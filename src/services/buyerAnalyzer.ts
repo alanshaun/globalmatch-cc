@@ -54,36 +54,42 @@ const FALLBACK_ANALYSIS: BuyerAnalysis = {
 };
 
 async function scrapeWebsiteContent(domain: string): Promise<string> {
-  try {
-    const { chromium } = await import("playwright");
-    const browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox"],
-    });
-    const page = await browser.newPage();
+  const UA =
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
-    let content = "";
-    const pages = [
-      { url: `https://${domain}`, limit: 3000 },
-      { url: `https://${domain}/about`, limit: 1000 },
-      { url: `https://${domain}/products`, limit: 2000 },
-    ];
-
-    for (const { url, limit } of pages) {
-      try {
-        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 15000 });
-        const text = await page.evaluate(() => document.body.innerText);
-        content += `\n[${url}]\n${text.slice(0, limit)}`;
-      } catch {
-        // Skip
-      }
-    }
-
-    await browser.close();
-    return content;
-  } catch {
-    return "";
+  function stripHtml(html: string): string {
+    return html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
   }
+
+  const pages = [
+    { url: `https://${domain}`, limit: 3000 },
+    { url: `https://${domain}/about`, limit: 1500 },
+    { url: `https://${domain}/products`, limit: 2000 },
+  ];
+
+  let content = "";
+  for (const { url, limit } of pages) {
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": UA, Accept: "text/html" },
+        signal: AbortSignal.timeout(8000),
+        redirect: "follow",
+      });
+      if (!res.ok) continue;
+      const html = await res.text();
+      const text = stripHtml(html);
+      content += `\n[${url}]\n${text.slice(0, limit)}`;
+    } catch {
+      // skip this page
+    }
+  }
+  return content;
 }
 
 export async function analyzeBuyer(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { SearchModal } from "@/components/buyer/SearchModal";
 import { BuyerCard } from "@/components/buyer/BuyerCard";
 import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
@@ -62,6 +62,7 @@ export default function BuyersPage() {
   const [foundCount, setFoundCount] = useState(0);
   const [selectedBuyer, setSelectedBuyer] = useState<BuyerResult | null>(null);
   const [progress, setProgress] = useState(0);
+  const buyerCountRef = useRef(0);
 
   const handleSearchStart = async (params: {
     productName: string;
@@ -76,6 +77,7 @@ export default function BuyersPage() {
     setFoundCount(0);
     setProgress(0);
     setStatusMsg("正在解析产品信息...");
+    buyerCountRef.current = 0;
 
     try {
       // Create session
@@ -84,7 +86,20 @@ export default function BuyersPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(params),
       });
-      const { sessionId } = await res.json();
+
+      if (!res.ok) {
+        setStatus("completed");
+        setStatusMsg("搜索启动失败，请重试");
+        return;
+      }
+
+      const body = await res.json();
+      const sessionId = body?.sessionId;
+      if (!sessionId) {
+        setStatus("completed");
+        setStatusMsg(body?.error || "搜索启动失败，请重试");
+        return;
+      }
 
       // Stream results via SSE
       const es = new EventSource(`/api/search/stream?sessionId=${sessionId}&userId=${params.userId}`);
@@ -100,6 +115,7 @@ export default function BuyersPage() {
           setBuyers((prev) => {
             const updated = [...prev, event.data];
             updated.sort((a, b) => b.matchScore - a.matchScore);
+            buyerCountRef.current = updated.length;
             return updated;
           });
           setFoundCount(event.foundCount || 0);
@@ -119,7 +135,7 @@ export default function BuyersPage() {
 
       es.onerror = () => {
         setStatus("completed");
-        setStatusMsg(`已找到 ${buyers.length} 家匹配买家`);
+        setStatusMsg(`已找到 ${buyerCountRef.current} 家匹配买家`);
         es.close();
       };
     } catch {
