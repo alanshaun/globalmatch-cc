@@ -150,9 +150,9 @@ export function BuyerCard({ buyer, onViewDetail }: BuyerCardProps) {
         </p>
       )}
 
-      {/* Intent Signals */}
-      {topSignals.length > 0 && (
-        <div className="flex items-center gap-2 mb-3">
+      {/* Intent Signals + Supplier Weakness Badge */}
+      {(topSignals.length > 0 || buyer.supplierWeaknessSignal?.hasWeaknessSignal) && (
+        <div className="flex items-center flex-wrap gap-2 mb-3">
           {topSignals.map((signal, idx) => (
             <span
               key={idx}
@@ -162,6 +162,12 @@ export function BuyerCard({ buyer, onViewDetail }: BuyerCardProps) {
               <span>{getSignalLabel(signal.type)}</span>
             </span>
           ))}
+          {buyer.supplierWeaknessSignal?.hasWeaknessSignal && (
+            <span className="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded-md font-medium flex items-center gap-1">
+              <span>⚠</span>
+              <span>供应商弱点</span>
+            </span>
+          )}
         </div>
       )}
 

@@ -12,6 +12,8 @@ import { searchViaBing } from "@/scrapers/bing";
 import { getContactsBatch } from "./pdlClient";
 import { detectIntentSignals } from "./intentSignals";
 import { analyzeBuyer, generateEmail, scrapeWebsiteContent } from "./buyerAnalyzer";
+import { detectSupplierWeakness } from "./supplierWeakness";
+import type { SupplierWeaknessResult } from "./supplierWeakness";
 import { COMPETITOR_DOMAIN_BLACKLIST, GENERIC_DOMAIN_BLACKLIST, COUNTRY_SEARCH_TERMS } from "@/lib/constants";
 import { llmCall } from "@/lib/llmClient";
 import type { ProductProfile } from "./productAnalyzer";
@@ -56,6 +58,7 @@ export interface BuyerResult {
   lastShipment: string | null;
   bestContactTiming: string;
   redFlags: string[];
+  supplierWeaknessSignal?: SupplierWeaknessResult;
 }
 
 interface AuditLog {
@@ -381,16 +384,19 @@ export async function runBuyerSearch(
     await Promise.allSettled(
       batch.map(async (candidate) => {
         try {
-          // Scrape website + detect signals concurrently
-          const [websiteContent, intentSignals] = await Promise.allSettled([
+          // Scrape website + detect signals + supplier weakness concurrently
+          const [websiteContent, intentSignals, weaknessResult] = await Promise.allSettled([
             scrapeWebsiteContent(candidate.domain),
             detectIntentSignals(candidate.companyName, candidate.domain),
+            detectSupplierWeakness(candidate.companyName, candidate.domain),
           ]);
 
           const content =
             websiteContent.status === "fulfilled" ? websiteContent.value : "";
           const signals =
             intentSignals.status === "fulfilled" ? intentSignals.value : [];
+          const supplierWeakness =
+            weaknessResult.status === "fulfilled" ? weaknessResult.value : undefined;
 
           // Analyze buyer
           const analysis = await analyzeBuyer(
@@ -455,6 +461,8 @@ export async function runBuyerSearch(
             lastShipment: candidate.lastShipment,
             bestContactTiming: analysis.bestContactTiming,
             redFlags: analysis.redFlags,
+            supplierWeaknessSignal:
+              supplierWeakness?.hasWeaknessSignal ? supplierWeakness : undefined,
           };
 
           // Save to DB

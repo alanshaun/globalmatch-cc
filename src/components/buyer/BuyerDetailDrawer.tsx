@@ -134,6 +134,49 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
                 </div>
               )}
 
+              {/* Supplier Weakness Signals */}
+              {buyer.supplierWeaknessSignal?.hasWeaknessSignal && (
+                <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-orange-500 text-base">⚠</span>
+                    <h3 className="text-sm font-semibold text-orange-700">供应商弱点信号</h3>
+                  </div>
+                  <div className="space-y-2 mb-3">
+                    {buyer.supplierWeaknessSignal.signals.map((sig, idx) => {
+                      const sourceLabel: Record<string, string> = {
+                        google: "搜索引擎",
+                        news: "新闻",
+                        hiring: "招聘",
+                      };
+                      const confidenceColor: Record<string, string> = {
+                        high: "text-red-600 bg-red-50",
+                        medium: "text-orange-600 bg-orange-100",
+                        low: "text-gray-500 bg-gray-100",
+                      };
+                      return (
+                        <div key={idx} className="bg-white rounded-lg p-3 border border-orange-100">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${confidenceColor[sig.confidence] || "text-gray-500 bg-gray-100"}`}>
+                              {sig.confidence === "high" ? "高" : sig.confidence === "medium" ? "中" : "低"}置信
+                            </span>
+                            <span className="text-xs text-muted">
+                              {sourceLabel[sig.source] || sig.source}
+                            </span>
+                          </div>
+                          <p className="text-xs text-foreground">{sig.description}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {buyer.supplierWeaknessSignal.opportunitySummary && (
+                    <div className="bg-white rounded-lg p-3 border border-orange-200">
+                      <p className="text-xs font-medium text-orange-700 mb-1">切入建议</p>
+                      <p className="text-xs text-foreground">{buyer.supplierWeaknessSignal.opportunitySummary}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {buyer.intentSignals.length > 0 && (
                 <div>
                   <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">意图信号</h3>

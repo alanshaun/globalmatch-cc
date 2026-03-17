@@ -4,6 +4,7 @@ import { useState } from "react";
 import { SearchModal } from "@/components/buyer/SearchModal";
 import { BuyerCard } from "@/components/buyer/BuyerCard";
 import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
+import type { SupplierWeaknessResult } from "@/services/supplierWeakness";
 
 export interface BuyerResult {
   id?: string;
@@ -45,6 +46,7 @@ export interface BuyerResult {
   lastShipment: string | null;
   bestContactTiming: string;
   redFlags: string[];
+  supplierWeaknessSignal?: SupplierWeaknessResult;
 }
 
 type SearchStatus =
