@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { SearchModal } from "@/components/buyer/SearchModal";
 import { BuyerCard } from "@/components/buyer/BuyerCard";
 import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
+import { ErrorBoundary, DrawerErrorBoundary } from "@/components/ErrorBoundary";
+import { normalizeBuyer, normalizeBuyerArray } from "@/lib/normalizeBuyer";
 import type { SupplierWeaknessResult } from "@/services/supplierWeakness";
 
 export interface BuyerResult {
@@ -94,7 +96,7 @@ export default function BuyersPage() {
     try {
       const res = await fetch(`/api/buyers?sessionId=${sessionId}&userId=${USER_ID}`);
       const data = await res.json();
-      const loaded: BuyerResult[] = data.buyers || [];
+      const loaded: BuyerResult[] = normalizeBuyerArray(data.buyers);
       setBuyers(loaded.sort((a, b) => b.matchScore - a.matchScore));
       setStatusMsg(`已加载 ${loaded.length} 家历史买家`);
       setFoundCount(loaded.length);
@@ -155,7 +157,7 @@ export default function BuyersPage() {
           setFoundCount(event.foundCount || 0);
         } else if (event.type === "new_buyer") {
           setBuyers((prev) => {
-            const updated = [...prev, event.data];
+            const updated = [...prev, normalizeBuyer(event.data)];
             updated.sort((a, b) => b.matchScore - a.matchScore);
             buyerCountRef.current = updated.length;
             return updated;
@@ -348,10 +350,12 @@ export default function BuyersPage() {
             <div className="columns-1 lg:columns-2 gap-4 space-y-4">
               {buyers.map((buyer, idx) => (
                 <div key={buyer.id || `${buyer.domain}-${idx}`} className="break-inside-avoid">
-                  <BuyerCard
-                    buyer={buyer}
-                    onViewDetail={() => setSelectedBuyer(buyer)}
-                  />
+                  <ErrorBoundary label="买家卡片">
+                    <BuyerCard
+                      buyer={buyer}
+                      onViewDetail={() => setSelectedBuyer(buyer)}
+                    />
+                  </ErrorBoundary>
                 </div>
               ))}
             </div>
@@ -376,10 +380,12 @@ export default function BuyersPage() {
       )}
 
       {selectedBuyer && (
-        <BuyerDetailDrawer
-          buyer={selectedBuyer}
-          onClose={() => setSelectedBuyer(null)}
-        />
+        <DrawerErrorBoundary>
+          <BuyerDetailDrawer
+            buyer={selectedBuyer}
+            onClose={() => setSelectedBuyer(null)}
+          />
+        </DrawerErrorBoundary>
       )}
     </div>
   );
