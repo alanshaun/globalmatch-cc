@@ -1,10 +1,7 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
-
-// ── Quick action cards ────────────────────────────────────────────────────────
-// Each card shows: where the user is in the workflow + what to do next.
-// If there's no data yet, the empty state is a launcher — not a "waiting" page.
 
 const WORKFLOW_STEPS = [
   {
@@ -16,7 +13,6 @@ const WORKFLOW_STEPS = [
     href: "/setup",
     color: "border-slate-200 bg-white",
     ctaColor: "bg-slate-800 text-white hover:bg-slate-700",
-    status: "todo",
   },
   {
     step: 2,
@@ -27,7 +23,6 @@ const WORKFLOW_STEPS = [
     href: "/buyers",
     color: "border-primary/20 bg-primary/5",
     ctaColor: "bg-primary text-white hover:bg-primary/90",
-    status: "todo",
   },
   {
     step: 3,
@@ -38,7 +33,6 @@ const WORKFLOW_STEPS = [
     href: "/trust-assets",
     color: "border-emerald-200 bg-emerald-50/50",
     ctaColor: "bg-emerald-600 text-white hover:bg-emerald-700",
-    status: "todo",
   },
   {
     step: 4,
@@ -49,7 +43,6 @@ const WORKFLOW_STEPS = [
     href: "/reactivation",
     color: "border-amber-200 bg-amber-50/50",
     ctaColor: "bg-amber-600 text-white hover:bg-amber-700",
-    status: "todo",
   },
 ];
 
@@ -61,43 +54,64 @@ const QUICK_TOOLS = [
   { icon: "🔗", label: "找供应链工厂", desc: "全球供应商快速匹配", href: "/supply-chain" },
 ];
 
-// ── Core metrics (empty state that communicates value) ─────────────────────────
-const METRICS = [
-  {
-    icon: "🎯",
-    label: "已找买家",
-    value: "—",
-    unit: "家",
-    tip: "开始第一次搜索后显示",
-    color: "text-primary",
-  },
-  {
-    icon: "📨",
-    label: "已发开发信",
-    value: "—",
-    unit: "封",
-    tip: "接入邮箱后统计",
-    color: "text-emerald-600",
-  },
-  {
-    icon: "👁",
-    label: "邮件打开率",
-    value: "—",
-    unit: "%",
-    tip: "发信后实时更新",
-    color: "text-amber-600",
-  },
-  {
-    icon: "💬",
-    label: "已收到回复",
-    value: "—",
-    unit: "封",
-    tip: "回复后统计",
-    color: "text-purple-600",
-  },
-];
+const USER_ID = "demo-user";
+
+interface Metrics {
+  buyerCount: number;
+  sentCount: number;
+  openRate: number;
+  repliedCount: number;
+}
 
 export default function DashboardPage() {
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/dashboard/metrics?userId=${USER_ID}`)
+      .then((r) => r.json())
+      .then(setMetrics)
+      .catch(() => {});
+  }, []);
+
+  const METRICS = [
+    {
+      icon: "🎯",
+      label: "已找买家",
+      value: metrics?.buyerCount ?? null,
+      unit: "家",
+      tip: "开始第一次搜索后显示",
+      color: "text-primary",
+      href: "/buyers",
+    },
+    {
+      icon: "📨",
+      label: "已发开发信",
+      value: metrics?.sentCount ?? null,
+      unit: "封",
+      tip: "通过平台发信后统计",
+      color: "text-emerald-600",
+      href: "/buyers",
+    },
+    {
+      icon: "👁",
+      label: "邮件打开率",
+      value: metrics?.openRate ?? null,
+      unit: "%",
+      tip: "发信后实时更新",
+      color: "text-amber-600",
+      href: "/reactivation",
+    },
+    {
+      icon: "💬",
+      label: "已收到回复",
+      value: metrics?.repliedCount ?? null,
+      unit: "封",
+      tip: "买家回复后统计",
+      color: "text-purple-600",
+      href: "/reactivation",
+    },
+  ];
+
   return (
     <div className="flex flex-col h-screen bg-slate-50/50">
       {/* Header */}
@@ -122,15 +136,27 @@ export default function DashboardPage() {
           {/* Metrics row */}
           <div className="grid grid-cols-4 gap-3">
             {METRICS.map((m) => (
-              <div key={m.label} className="bg-white border border-border rounded-xl p-4">
+              <Link
+                key={m.label}
+                href={m.href}
+                className="bg-white border border-border rounded-xl p-4 hover:border-primary/30 hover:shadow-sm transition-all group"
+              >
                 <div className="text-xl mb-2">{m.icon}</div>
                 <div className={`text-2xl font-bold ${m.color}`}>
-                  {m.value}
-                  <span className="text-sm font-normal text-muted ml-1">{m.unit}</span>
+                  {m.value === null ? (
+                    <span className="text-gray-300 animate-pulse">—</span>
+                  ) : (
+                    <>
+                      {m.value}
+                      <span className="text-sm font-normal text-muted ml-1">{m.unit}</span>
+                    </>
+                  )}
                 </div>
-                <div className="text-xs font-medium text-foreground mt-0.5">{m.label}</div>
+                <div className="text-xs font-medium text-foreground mt-0.5 group-hover:text-primary transition-colors">
+                  {m.label}
+                </div>
                 <div className="text-[10px] text-muted mt-1">{m.tip}</div>
-              </div>
+              </Link>
             ))}
           </div>
 

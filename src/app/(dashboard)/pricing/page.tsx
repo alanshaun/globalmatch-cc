@@ -19,6 +19,21 @@ interface PricingResult {
 
 const TREND_ICONS = { up: "↑", down: "↓", stable: "→" };
 const TREND_COLORS = { up: "text-success", down: "text-danger", stable: "text-muted" };
+const TREND_BG = { up: "bg-success/10 text-success border-success/20", down: "bg-danger/10 text-danger border-danger/20", stable: "bg-gray-100 text-muted border-border" };
+
+const SEGMENT_LABELS = ["低价段", "中低价", "中价段", "中高价", "高价段"];
+const SEGMENT_COLORS = [
+  "bg-blue-300",
+  "bg-blue-400",
+  "bg-primary",
+  "bg-blue-600",
+  "bg-blue-800",
+];
+
+function parsePrice(price: string): number | null {
+  const match = price.match(/[\d.]+/);
+  return match ? parseFloat(match[0]) : null;
+}
 
 export default function PricingPage() {
   const [productName, setProductName] = useState("");
@@ -27,7 +42,6 @@ export default function PricingPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PricingResult | null>(null);
 
-  // Pre-fill from global seller profile
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SELLER_PROFILE_KEY);
@@ -55,6 +69,19 @@ export default function PricingPage() {
       setLoading(false);
     }
   };
+
+  // Compute my price position within [min, max] range (0–100%)
+  const myPriceNum = myPrice ? parsePrice(myPrice) : null;
+  const myPricePosition =
+    result && myPriceNum !== null && result.marketMax > result.marketMin
+      ? Math.min(
+          100,
+          Math.max(
+            0,
+            ((myPriceNum - result.marketMin) / (result.marketMax - result.marketMin)) * 100
+          )
+        )
+      : null;
 
   return (
     <div className="flex flex-col h-screen">
@@ -120,69 +147,107 @@ export default function PricingPage() {
 
           {result && (
             <div className="space-y-4 animate-fade-in">
-              {/* Price Overview */}
-              <div className="bg-white border border-border rounded-xl p-6">
-                <div className="grid grid-cols-3 gap-4 mb-4">
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-foreground">${result.marketMin}</div>
-                    <div className="text-xs text-muted">市场最低</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-3xl font-bold text-primary">${result.marketMedian}</div>
-                    <div className="text-xs text-muted">市场中位</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-2xl font-bold text-foreground">${result.marketMax}</div>
-                    <div className="text-xs text-muted">市场最高</div>
-                  </div>
+              {/* Price Overview Cards */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-white border border-border rounded-xl p-4 text-center">
+                  <div className="text-xs text-muted mb-1">市场最低</div>
+                  <div className="text-xl font-bold text-foreground">${result.marketMin}</div>
                 </div>
-
-                {myPrice && (
-                  <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg mb-4">
-                    <p className="text-sm font-medium text-foreground">
-                      你的报价 <span className="text-primary font-bold">{myPrice}</span>，{result.myPriceAssessment}
-                    </p>
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-muted">价格趋势：</span>
-                  <span className={`text-sm font-medium ${TREND_COLORS[result.trend]}`}>
-                    {TREND_ICONS[result.trend]} {result.trend === "up" ? "上涨" : result.trend === "down" ? "下跌" : "稳定"}
-                  </span>
-                  <span className="text-xs text-muted">· {result.trendReason}</span>
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-4 text-center">
+                  <div className="text-xs text-muted mb-1">市场中位</div>
+                  <div className="text-2xl font-bold text-primary">${result.marketMedian}</div>
+                  <div className="text-[10px] text-muted mt-0.5">参考基准</div>
+                </div>
+                <div className="bg-white border border-border rounded-xl p-4 text-center">
+                  <div className="text-xs text-muted mb-1">市场最高</div>
+                  <div className="text-xl font-bold text-foreground">${result.marketMax}</div>
                 </div>
               </div>
 
-              {/* Price Distribution */}
+              {/* Visual Price Range Bar */}
               <div className="bg-white border border-border rounded-xl p-5">
-                <h3 className="text-sm font-semibold mb-3">价格分布</h3>
-                <div className="space-y-2">
-                  {(result.distribution || [10, 25, 35, 20, 10]).map((pct, idx) => {
-                    const labels = ["低价段", "中低价", "中价段", "中高价", "高价段"];
-                    return (
-                      <div key={idx} className="flex items-center gap-3">
-                        <span className="text-xs text-muted w-12">{labels[idx]}</span>
-                        <div className="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary/60 rounded-full"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-muted w-8">{pct}%</span>
-                      </div>
-                    );
-                  })}
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-semibold">价格区间分布</h3>
+                  <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${TREND_BG[result.trend]}`}>
+                    {TREND_ICONS[result.trend]} {result.trend === "up" ? "价格上涨" : result.trend === "down" ? "价格下跌" : "价格稳定"}
+                  </span>
                 </div>
+
+                {/* Gradient range bar */}
+                <div className="relative mb-6">
+                  <div className="h-8 rounded-full bg-gradient-to-r from-blue-200 via-primary to-blue-800 relative overflow-visible">
+                    {/* Median marker */}
+                    <div
+                      className="absolute top-1/2 -translate-y-1/2 w-0.5 h-10 bg-white/70"
+                      style={{
+                        left: `${((result.marketMedian - result.marketMin) / (result.marketMax - result.marketMin)) * 100}%`,
+                      }}
+                    />
+                    {/* My price marker */}
+                    {myPricePosition !== null && (
+                      <div
+                        className="absolute -top-2 -translate-x-1/2"
+                        style={{ left: `${myPricePosition}%` }}
+                      >
+                        <div className="w-4 h-4 rounded-full bg-white border-2 border-amber-500 shadow-md" />
+                        <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-semibold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
+                          你的报价
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Labels below bar */}
+                  <div className="flex justify-between mt-2 text-xs text-muted">
+                    <span>${result.marketMin}</span>
+                    <span className="text-primary font-medium">中位 ${result.marketMedian}</span>
+                    <span>${result.marketMax}</span>
+                  </div>
+                </div>
+
+                {/* Segment breakdown */}
+                <div className="space-y-2">
+                  {(result.distribution || [10, 25, 35, 20, 10]).map((pct, idx) => (
+                    <div key={idx} className="flex items-center gap-3">
+                      <div className={`w-2 h-2 rounded-full ${SEGMENT_COLORS[idx]} flex-shrink-0`} />
+                      <span className="text-xs text-muted w-14">{SEGMENT_LABELS[idx]}</span>
+                      <div className="flex-1 h-3 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full ${SEGMENT_COLORS[idx]} rounded-full transition-all duration-700`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-medium text-foreground w-8 text-right">{pct}%</span>
+                    </div>
+                  ))}
+                </div>
+
+                {result.trendReason && (
+                  <p className="text-xs text-muted mt-3 pt-3 border-t border-border">{result.trendReason}</p>
+                )}
               </div>
+
+              {/* My price assessment */}
+              {myPrice && result.myPriceAssessment && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+                  <span className="text-xl">💰</span>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">
+                      你的报价 <span className="text-primary font-bold">{myPrice}</span>
+                    </p>
+                    <p className="text-sm text-foreground/80 mt-0.5">{result.myPriceAssessment}</p>
+                  </div>
+                </div>
+              )}
 
               {/* Strategies */}
               <div className="bg-white border border-border rounded-xl p-5">
-                <h3 className="text-sm font-semibold mb-3">AI报价策略建议</h3>
+                <h3 className="text-sm font-semibold mb-3">AI 报价策略建议</h3>
                 <div className="space-y-3">
                   {result.strategies.map((strategy, idx) => (
-                    <div key={idx} className="flex items-start gap-3">
-                      <span className="text-primary font-bold text-sm mt-0.5">{idx + 1}</span>
+                    <div key={idx} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                      <span className="w-5 h-5 rounded-full bg-primary text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                        {idx + 1}
+                      </span>
                       <p className="text-sm text-foreground">{strategy}</p>
                     </div>
                   ))}

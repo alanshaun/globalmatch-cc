@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { SearchModal } from "@/components/buyer/SearchModal";
 import { BuyerCard } from "@/components/buyer/BuyerCard";
@@ -63,6 +63,7 @@ interface PastSession {
 }
 
 type SearchStatus = "idle" | "running" | "completed";
+type ScoreFilter = "all" | "high" | "medium" | "low";
 
 const USER_ID = "demo-user";
 
@@ -81,6 +82,11 @@ export default function BuyersPage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [savedProfile, setSavedProfile] = useState<SellerProfile | null>(null);
+
+  // Filter states
+  const [filterCountry, setFilterCountry] = useState("all");
+  const [filterIndustry, setFilterIndustry] = useState("all");
+  const [filterScore, setFilterScore] = useState<ScoreFilter>("all");
 
   // Load saved global profile
   useEffect(() => {
@@ -104,6 +110,9 @@ export default function BuyersPage() {
     setActiveSessionId(sessionId);
     setBuyers([]);
     setStatus("completed");
+    setFilterCountry("all");
+    setFilterIndustry("all");
+    setFilterScore("all");
 
     try {
       const res = await fetch(`/api/buyers?sessionId=${sessionId}&userId=${USER_ID}`);
@@ -134,6 +143,9 @@ export default function BuyersPage() {
     setStatusMsg("正在解析产品信息...");
     buyerCountRef.current = 0;
     setActiveSessionId(null);
+    setFilterCountry("all");
+    setFilterIndustry("all");
+    setFilterScore("all");
 
     try {
       const res = await fetch("/api/search", {
@@ -182,7 +194,6 @@ export default function BuyersPage() {
           setStatusMsg(`已找到 ${event.foundCount} 家匹配买家`);
           setProgress(100);
           es.close();
-          // Refresh sessions list
           fetch(`/api/sessions?userId=${USER_ID}`)
             .then((r) => r.json())
             .then((data) => setSessions(data.sessions || []))
@@ -204,6 +215,31 @@ export default function BuyersPage() {
       setStatusMsg("搜索遇到问题，请重试");
     }
   };
+
+  // Derived filter options from current buyers
+  const countryOptions = useMemo(() => {
+    const countries = [...new Set(buyers.map((b) => b.country).filter(Boolean))].sort();
+    return countries;
+  }, [buyers]);
+
+  const industryOptions = useMemo(() => {
+    const industries = [...new Set(buyers.map((b) => b.industry).filter(Boolean))].sort();
+    return industries;
+  }, [buyers]);
+
+  // Apply filters
+  const filteredBuyers = useMemo(() => {
+    return buyers.filter((b) => {
+      if (filterCountry !== "all" && b.country !== filterCountry) return false;
+      if (filterIndustry !== "all" && b.industry !== filterIndustry) return false;
+      if (filterScore === "high" && b.matchScore < 75) return false;
+      if (filterScore === "medium" && (b.matchScore < 50 || b.matchScore >= 75)) return false;
+      if (filterScore === "low" && b.matchScore >= 50) return false;
+      return true;
+    });
+  }, [buyers, filterCountry, filterIndustry, filterScore]);
+
+  const hasActiveFilter = filterCountry !== "all" || filterIndustry !== "all" || filterScore !== "all";
 
   return (
     <div className="flex flex-col h-screen">
@@ -315,10 +351,85 @@ export default function BuyersPage() {
         </div>
       )}
 
+      {/* Filter Bar — only visible when there are results */}
+      {buyers.length > 0 && (
+        <div className="px-6 py-2.5 border-b border-border bg-white flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-medium text-muted shrink-0">筛选：</span>
+
+          {/* Country filter */}
+          {countryOptions.length > 1 && (
+            <select
+              value={filterCountry}
+              onChange={(e) => setFilterCountry(e.target.value)}
+              className={`text-xs border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors ${
+                filterCountry !== "all"
+                  ? "border-primary bg-primary/5 text-primary font-medium"
+                  : "border-border text-foreground"
+              }`}
+            >
+              <option value="all">全部国家</option>
+              {countryOptions.map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Industry filter */}
+          {industryOptions.length > 1 && (
+            <select
+              value={filterIndustry}
+              onChange={(e) => setFilterIndustry(e.target.value)}
+              className={`text-xs border rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/30 transition-colors ${
+                filterIndustry !== "all"
+                  ? "border-primary bg-primary/5 text-primary font-medium"
+                  : "border-border text-foreground"
+              }`}
+            >
+              <option value="all">全部行业</option>
+              {industryOptions.map((i) => (
+                <option key={i} value={i}>{i}</option>
+              ))}
+            </select>
+          )}
+
+          {/* Score filter */}
+          <div className="flex items-center gap-1">
+            {(["all", "high", "medium", "low"] as ScoreFilter[]).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilterScore(s)}
+                className={`text-xs px-2.5 py-1.5 rounded-lg border transition-colors ${
+                  filterScore === s
+                    ? "border-primary bg-primary text-white"
+                    : "border-border text-foreground hover:bg-gray-50"
+                }`}
+              >
+                {s === "all" ? "全部评分" : s === "high" ? "高匹配 ≥75" : s === "medium" ? "中匹配 50-74" : "低匹配 <50"}
+              </button>
+            ))}
+          </div>
+
+          {/* Active count + reset */}
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            <span className="text-xs text-muted">
+              显示 <span className="font-semibold text-foreground">{filteredBuyers.length}</span> / {buyers.length} 家
+            </span>
+            {hasActiveFilter && (
+              <button
+                onClick={() => { setFilterCountry("all"); setFilterIndustry("all"); setFilterScore("all"); }}
+                className="text-xs text-primary hover:underline"
+              >
+                清除筛选
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Content */}
       <div className="flex-1 overflow-auto p-6" onClick={() => showHistory && setShowHistory(false)}>
 
-        {/* Profile banner — shows if global profile is saved */}
+        {/* Profile banner */}
         {savedProfile && buyers.length === 0 && status === "idle" && (
           <div className="mb-4 flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
             <span className="text-xl">✅</span>
@@ -377,8 +488,23 @@ export default function BuyersPage() {
 
         {buyers.length > 0 && (
           <div className="max-w-5xl mx-auto">
+            {/* Empty filter result */}
+            {filteredBuyers.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 text-center">
+                <div className="text-3xl mb-3">🔍</div>
+                <p className="text-sm font-medium text-foreground">没有符合条件的买家</p>
+                <p className="text-xs text-muted mt-1">尝试调整筛选条件</p>
+                <button
+                  onClick={() => { setFilterCountry("all"); setFilterIndustry("all"); setFilterScore("all"); }}
+                  className="mt-4 text-sm text-primary hover:underline"
+                >
+                  清除所有筛选
+                </button>
+              </div>
+            )}
+
             <div className="columns-1 lg:columns-2 gap-4 space-y-4">
-              {buyers.map((buyer, idx) => (
+              {filteredBuyers.map((buyer, idx) => (
                 <div key={buyer.id || `${buyer.domain}-${idx}`} className="break-inside-avoid">
                   <ErrorBoundary label="买家卡片">
                     <BuyerCard
