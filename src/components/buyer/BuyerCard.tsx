@@ -7,203 +7,190 @@ interface BuyerCardProps {
   onViewDetail: () => void;
 }
 
-function getScoreColor(score: number): string {
-  if (score >= 80) return "text-success";
-  if (score >= 60) return "text-primary";
-  return "text-muted";
-}
-
-function getScoreBg(score: number): string {
-  if (score >= 80) return "bg-success";
-  if (score >= 60) return "bg-primary";
-  return "bg-gray-300";
-}
-
-function getSignalIcon(type: string): string {
-  const icons: Record<string, string> = {
-    funding: "💰",
-    product_launch: "📢",
-    supplier_change: "🔄",
-    hiring: "👥",
-    hiring_procurement: "🔥",
-    expansion: "📈",
-  };
-  return icons[type] || "📌";
-}
-
-function getSignalLabel(type: string): string {
-  const labels: Record<string, string> = {
-    funding: "近期融资",
-    product_launch: "新品发布",
-    supplier_change: "换供应商",
-    hiring: "招聘",
-    hiring_procurement: "招聘采购",
-    expansion: "业务扩张",
-  };
-  return labels[type] || "动态";
-}
-
-function getDataSourceBadge(source: string) {
-  const badges: Record<string, { label: string; color: string }> = {
-    customs: { label: "海关数据", color: "bg-primary/10 text-primary" },
-    serpapi: { label: "AI分析", color: "bg-purple-50 text-purple-600" },
-    ddg: { label: "AI分析", color: "bg-purple-50 text-purple-600" },
-    bing: { label: "AI分析", color: "bg-purple-50 text-purple-600" },
-    cache: { label: "缓存数据", color: "bg-gray-100 text-gray-600" },
-    pdl: { label: "商业数据库", color: "bg-blue-50 text-blue-600" },
-  };
-  return badges[source] || { label: source, color: "bg-gray-100 text-gray-600" };
-}
-
-function getEmailQualityBadge(quality: string) {
-  if (quality === "verified")
-    return <span className="text-xs text-success font-medium">✓ 已验证</span>;
-  if (quality === "generic")
-    return <span className="text-xs text-warning font-medium">通用邮箱</span>;
-  if (quality === "unverified")
-    return <span className="text-xs text-muted">待验证</span>;
-  return null;
-}
-
-export function BuyerCard({ buyer, onViewDetail }: BuyerCardProps) {
-  const topContact = buyer.contacts[0];
-  const topSignals = buyer.intentSignals.filter((s) => s.strength === "high").slice(0, 2);
-  const dataSource = getDataSourceBadge(buyer.dataSource);
+/** SVG circular progress ring */
+function ScoreRing({ score }: { score: number }) {
+  const r = 28;
+  const circ = 2 * Math.PI * r;
+  const offset = circ * (1 - score / 100);
+  const color = score >= 80 ? "#059669" : score >= 60 ? "#1B4FD8" : "#94A3B8";
 
   return (
-    <div className="bg-white border border-border rounded-xl p-5 hover:shadow-md transition-all duration-200 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-start gap-3">
-          {/* Logo placeholder */}
-          <div className="w-10 h-10 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
-            <span className="text-lg font-bold text-gray-400">
-              {buyer.companyName[0]?.toUpperCase() || "?"}
-            </span>
-          </div>
-          <div>
-            <h3 className="text-base font-semibold text-foreground leading-tight">
-              {buyer.companyName}
-            </h3>
-            <div className="flex items-center gap-2 mt-1 text-xs text-muted">
-              <span>🌍 {buyer.country}</span>
-              {buyer.industry && (
-                <>
-                  <span>·</span>
-                  <span>{buyer.industry}</span>
-                </>
-              )}
-              {buyer.shipmentCount > 0 && (
-                <>
-                  <span>·</span>
-                  <span>进口商</span>
-                </>
-              )}
-            </div>
-          </div>
+    <div className="relative w-16 h-16 flex-shrink-0">
+      <svg viewBox="0 0 64 64" className="w-full h-full -rotate-90">
+        <circle cx="32" cy="32" r={r} fill="none" stroke="#F1F5F9" strokeWidth="5" />
+        <circle
+          cx="32" cy="32" r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="5"
+          strokeLinecap="round"
+          strokeDasharray={circ}
+          strokeDashoffset={offset}
+          style={{ transition: "stroke-dashoffset 0.6s ease" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-sm font-bold leading-none" style={{ color }}>{score}</span>
+        <span className="text-[9px] text-slate-400 leading-none mt-0.5">概率</span>
+      </div>
+    </div>
+  );
+}
+
+/** Negotiation risk badge derived from matchScore + redFlags */
+function getRisk(buyer: BuyerResult) {
+  const flags = (buyer.redFlags ?? []).length;
+  const s = buyer.matchScore;
+  if (flags >= 2 || s < 50)
+    return { label: "高谈判风险", bg: "bg-red-50 text-red-600 border-red-200" };
+  if (flags === 1 || s < 70)
+    return { label: "中谈判风险", bg: "bg-amber-50 text-amber-600 border-amber-200" };
+  return { label: "低谈判风险", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+}
+
+const SIGNAL_ICON: Record<string, string> = {
+  funding: "💰",
+  product_launch: "📢",
+  supplier_change: "🔄",
+  hiring: "👥",
+  hiring_procurement: "🔥",
+  expansion: "📈",
+};
+const SIGNAL_LABEL: Record<string, string> = {
+  funding: "近期融资",
+  product_launch: "新品发布",
+  supplier_change: "换供应商",
+  hiring: "招聘",
+  hiring_procurement: "招聘采购",
+  expansion: "业务扩张",
+};
+
+export function BuyerCard({ buyer, onViewDetail }: BuyerCardProps) {
+  const contacts = buyer.contacts ?? [];
+  const intentSignals = buyer.intentSignals ?? [];
+  const topContact = contacts[0];
+  const hotSignals = intentSignals.filter((s) => s.strength === "high").slice(0, 2);
+  const risk = getRisk(buyer);
+  const initial = buyer.companyName[0]?.toUpperCase() || "?";
+
+  return (
+    <div className="group bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg hover:border-slate-300 transition-all duration-200 animate-fade-in">
+
+      {/* ── Header ── */}
+      <div className="flex items-start gap-3 mb-4">
+        {/* Logo */}
+        <div className="w-11 h-11 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0 text-lg font-bold text-slate-400">
+          {initial}
         </div>
-        <button className="text-muted hover:text-warning transition-colors text-lg">♡</button>
+
+        {/* Name + meta */}
+        <div className="flex-1 min-w-0">
+          <h3 className="text-base font-semibold text-slate-900 leading-snug truncate">
+            {buyer.companyName}
+          </h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {buyer.country}
+            {buyer.industry ? ` · ${buyer.industry}` : ""}
+            {buyer.shipmentCount > 0 ? " · 进口商" : ""}
+          </p>
+        </div>
+
+        {/* Score ring */}
+        <div className="flex flex-col items-center gap-1">
+          <ScoreRing score={buyer.matchScore} />
+          <span className="text-[10px] text-slate-400">签单概率</span>
+        </div>
       </div>
 
-      {/* Data source badges */}
-      <div className="flex items-center gap-2 mb-3">
-        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${dataSource.color}`}>
-          {buyer.shipmentCount > 0 ? "📦 " : ""}
-          {buyer.shipmentCount > 0 ? "海关数据" : dataSource.label}
+      {/* ── Badge row ── */}
+      <div className="flex flex-wrap gap-1.5 mb-3">
+        {/* Negotiation risk */}
+        <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full border ${risk.bg}`}>
+          {risk.label}
         </span>
+
+        {/* Data source */}
+        {buyer.shipmentCount > 0 ? (
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">
+            📦 海关数据
+          </span>
+        ) : null}
+
+        {/* Email verified */}
         {topContact?.emailQuality === "verified" && (
-          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-success/10 text-success">
-            ✅ 邮箱已验证
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+            ✓ 邮箱已验证
           </span>
         )}
-        {buyer.fromCache && (
-          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-muted">
-            历史缓存
+
+        {/* Supplier weakness */}
+        {buyer.supplierWeaknessSignal?.hasWeaknessSignal && (
+          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-orange-50 text-orange-600 border border-orange-200">
+            ⚠ 供应商弱点
           </span>
         )}
+
+        {/* Hot intent signals */}
+        {hotSignals.map((sig, i) => (
+          <span
+            key={i}
+            className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200"
+          >
+            {SIGNAL_ICON[sig.type] || "📌"} {SIGNAL_LABEL[sig.type] || "动态"}
+          </span>
+        ))}
       </div>
 
-      {/* Match Score */}
-      <div className="mb-3">
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs text-muted">匹配度</span>
-          <span className={`text-base font-bold ${getScoreColor(buyer.matchScore)}`}>
-            {buyer.matchScore}
-          </span>
-        </div>
-        <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${getScoreBg(buyer.matchScore)}`}
-            style={{ width: `${buyer.matchScore}%` }}
-          />
-        </div>
-        {buyer.matchReason && (
-          <p className="text-xs text-muted mt-1.5 line-clamp-2">{buyer.matchReason}</p>
-        )}
-      </div>
-
-      {/* Shipment Info */}
-      {buyer.shipmentCount > 0 && (
-        <p className="text-xs text-muted mb-3">
-          📦 近12个月进口{buyer.shipmentCount}次
-          {buyer.lastShipment && ` · 最近：${buyer.lastShipment}`}
+      {/* ── Match reason ── */}
+      {buyer.matchReason && (
+        <p className="text-sm text-slate-600 leading-relaxed line-clamp-2 mb-3">
+          {buyer.matchReason}
         </p>
       )}
 
-      {/* Intent Signals + Supplier Weakness Badge */}
-      {(topSignals.length > 0 || buyer.supplierWeaknessSignal?.hasWeaknessSignal) && (
-        <div className="flex items-center flex-wrap gap-2 mb-3">
-          {topSignals.map((signal, idx) => (
-            <span
-              key={idx}
-              className="text-xs bg-warning/15 text-warning px-2 py-1 rounded-md font-medium flex items-center gap-1"
-            >
-              <span>{getSignalIcon(signal.type)}</span>
-              <span>{getSignalLabel(signal.type)}</span>
-            </span>
-          ))}
-          {buyer.supplierWeaknessSignal?.hasWeaknessSignal && (
-            <span className="text-xs bg-orange-50 text-orange-600 border border-orange-200 px-2 py-1 rounded-md font-medium flex items-center gap-1">
-              <span>⚠</span>
-              <span>供应商弱点</span>
-            </span>
+      {/* ── Shipment pill ── */}
+      {buyer.shipmentCount > 0 && (
+        <p className="text-xs text-slate-400 mb-3">
+          近12个月进口 <span className="font-semibold text-slate-600">{buyer.shipmentCount}</span> 次
+          {buyer.lastShipment ? ` · 最近 ${buyer.lastShipment}` : ""}
+        </p>
+      )}
+
+      {/* ── Top contact ── */}
+      {topContact?.email && (
+        <div className="flex items-center gap-2 mb-4 py-2 px-3 bg-slate-50 rounded-lg">
+          <span className="text-sm text-slate-700 font-medium truncate">
+            {topContact.name || "联系人"}
+          </span>
+          {topContact.title && (
+            <span className="text-xs text-slate-400 shrink-0">· {topContact.title}</span>
+          )}
+          <span className="ml-auto text-xs text-slate-400 font-mono truncate max-w-[160px]">
+            {topContact.email}
+          </span>
+          {topContact.emailQuality === "verified" && (
+            <span className="text-emerald-500 text-xs shrink-0">✓</span>
           )}
         </div>
       )}
 
-      {/* Contact */}
-      {topContact && topContact.email && (
-        <div className="mb-4">
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-foreground font-medium">
-              {topContact.name || "联系人"}
-            </span>
-            {topContact.title && (
-              <span className="text-xs text-muted">· {topContact.title}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 mt-0.5">
-            <span className="text-xs text-muted">📧 {topContact.email}</span>
-            {getEmailQualityBadge(topContact.emailQuality)}
-          </div>
-        </div>
-      )}
-
-      {/* Actions */}
-      <div className="flex items-center gap-2 pt-3 border-t border-border">
+      {/* ── Actions ── */}
+      <div className="flex items-center gap-2 pt-3 border-t border-slate-100">
         <button
           onClick={onViewDetail}
-          className="flex-1 text-center py-1.5 rounded-lg text-sm font-medium text-primary border border-primary/30 hover:bg-primary/5 transition-colors"
+          className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-primary text-white hover:bg-primary-600 active:scale-[0.98] transition-all duration-150 shadow-sm shadow-primary/20"
         >
-          发开发信
+          模拟谈判 →
         </button>
         <button
           onClick={onViewDetail}
-          className="flex-1 text-center py-1.5 rounded-lg text-sm font-medium text-foreground border border-border hover:bg-gray-50 transition-colors"
+          className="px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50 active:scale-[0.98] transition-all duration-150"
         >
-          查看详情
+          详情
         </button>
-        <button className="p-1.5 text-muted hover:text-foreground">···</button>
+        <button className="p-2.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 transition-colors">
+          ···
+        </button>
       </div>
     </div>
   );

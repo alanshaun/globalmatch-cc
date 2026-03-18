@@ -344,14 +344,17 @@ export default function BuyersPage() {
         )}
 
         {buyers.length > 0 && (
-          <div className="max-w-3xl mx-auto space-y-3">
-            {buyers.map((buyer, idx) => (
-              <BuyerCard
-                key={buyer.id || `${buyer.domain}-${idx}`}
-                buyer={buyer}
-                onViewDetail={() => setSelectedBuyer(buyer)}
-              />
-            ))}
+          <div className="max-w-5xl mx-auto">
+            <div className="columns-1 lg:columns-2 gap-4 space-y-4">
+              {buyers.map((buyer, idx) => (
+                <div key={buyer.id || `${buyer.domain}-${idx}`} className="break-inside-avoid">
+                  <BuyerCard
+                    buyer={buyer}
+                    onViewDetail={() => setSelectedBuyer(buyer)}
+                  />
+                </div>
+              ))}
+            </div>
             {status === "running" && (
               <div className="flex items-center justify-center py-8">
                 <div className="flex items-center gap-3 text-muted text-sm">
