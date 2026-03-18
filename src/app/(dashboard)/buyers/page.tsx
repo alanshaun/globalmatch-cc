@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { SearchModal } from "@/components/buyer/SearchModal";
 import { BuyerCard } from "@/components/buyer/BuyerCard";
 import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
@@ -49,10 +49,17 @@ export interface BuyerResult {
   supplierWeaknessSignal?: SupplierWeaknessResult;
 }
 
-type SearchStatus =
-  | "idle"
-  | "running"
-  | "completed";
+interface PastSession {
+  id: string;
+  productName: string;
+  targetCountries: string[];
+  resultCount: number;
+  createdAt: string;
+}
+
+type SearchStatus = "idle" | "running" | "completed";
+
+const USER_ID = "demo-user";
 
 export default function BuyersPage() {
   const [showModal, setShowModal] = useState(false);
@@ -63,6 +70,40 @@ export default function BuyersPage() {
   const [selectedBuyer, setSelectedBuyer] = useState<BuyerResult | null>(null);
   const [progress, setProgress] = useState(0);
   const buyerCountRef = useRef(0);
+
+  const [sessions, setSessions] = useState<PastSession[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  // Load past sessions on mount
+  useEffect(() => {
+    fetch(`/api/sessions?userId=${USER_ID}`)
+      .then((r) => r.json())
+      .then((data) => setSessions(data.sessions || []))
+      .catch(() => {});
+  }, []);
+
+  const loadSession = async (sessionId: string) => {
+    setLoadingHistory(true);
+    setShowHistory(false);
+    setActiveSessionId(sessionId);
+    setBuyers([]);
+    setStatus("completed");
+
+    try {
+      const res = await fetch(`/api/buyers?sessionId=${sessionId}&userId=${USER_ID}`);
+      const data = await res.json();
+      const loaded: BuyerResult[] = data.buyers || [];
+      setBuyers(loaded.sort((a, b) => b.matchScore - a.matchScore));
+      setStatusMsg(`已加载 ${loaded.length} 家历史买家`);
+      setFoundCount(loaded.length);
+    } catch {
+      setStatusMsg("加载历史记录失败");
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
 
   const handleSearchStart = async (params: {
     productName: string;
@@ -78,9 +119,9 @@ export default function BuyersPage() {
     setProgress(0);
     setStatusMsg("正在解析产品信息...");
     buyerCountRef.current = 0;
+    setActiveSessionId(null);
 
     try {
-      // Create session
       const res = await fetch("/api/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -101,7 +142,8 @@ export default function BuyersPage() {
         return;
       }
 
-      // Stream results via SSE
+      setActiveSessionId(sessionId);
+
       const es = new EventSource(`/api/search/stream?sessionId=${sessionId}&userId=${params.userId}`);
 
       es.onmessage = (e) => {
@@ -126,6 +168,11 @@ export default function BuyersPage() {
           setStatusMsg(`已找到 ${event.foundCount} 家匹配买家`);
           setProgress(100);
           es.close();
+          // Refresh sessions list
+          fetch(`/api/sessions?userId=${USER_ID}`)
+            .then((r) => r.json())
+            .then((data) => setSessions(data.sessions || []))
+            .catch(() => {});
         } else if (event.type === "error") {
           setStatusMsg(event.message || "搜索完成");
           setStatus("completed");
@@ -152,13 +199,72 @@ export default function BuyersPage() {
           <h1 className="text-lg font-semibold text-foreground">找买家</h1>
           <p className="text-sm text-muted">AI智能匹配全球真实买家，质量优先</p>
         </div>
-        <button
-          onClick={() => setShowModal(true)}
-          className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors flex items-center gap-2"
-        >
-          <span>+</span>
-          新建匹配
-        </button>
+        <div className="flex items-center gap-2">
+          {/* History button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowHistory((v) => !v)}
+              className="border border-border text-foreground px-3 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-1.5"
+            >
+              <span>🕐</span>
+              历史记录
+              {sessions.length > 0 && (
+                <span className="ml-1 bg-primary/10 text-primary text-xs px-1.5 rounded-full">
+                  {sessions.length}
+                </span>
+              )}
+            </button>
+
+            {showHistory && (
+              <div className="absolute right-0 top-full mt-1 w-80 bg-white border border-border rounded-xl shadow-xl z-50 overflow-hidden">
+                <div className="px-4 py-3 border-b border-border">
+                  <p className="text-sm font-medium text-foreground">历史搜索记录</p>
+                </div>
+                {sessions.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-sm text-muted">暂无历史记录</div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto">
+                    {sessions.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => loadSession(s.id)}
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-border/50 transition-colors ${
+                          activeSessionId === s.id ? "bg-primary/5" : ""
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-sm font-medium text-foreground truncate max-w-[180px]">
+                            {s.productName}
+                          </span>
+                          <span className="text-xs text-primary font-medium ml-2 shrink-0">
+                            {s.resultCount} 家
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs text-muted">
+                            {s.targetCountries.slice(0, 2).join("、")}
+                          </span>
+                          <span className="text-xs text-muted">·</span>
+                          <span className="text-xs text-muted">
+                            {new Date(s.createdAt).toLocaleDateString("zh-CN")}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowModal(true)}
+            className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors flex items-center gap-2"
+          >
+            <span>+</span>
+            新建匹配
+          </button>
+        </div>
       </div>
 
       {/* Status Bar */}
@@ -180,14 +286,23 @@ export default function BuyersPage() {
         </div>
       )}
 
-      {status === "completed" && buyers.length > 0 && (
+      {loadingHistory && (
+        <div className="px-6 py-3 bg-primary/5 border-b border-primary/20">
+          <div className="flex items-center gap-3">
+            <div className="w-3 h-3 rounded-full bg-primary animate-pulse" />
+            <span className="text-sm text-primary font-medium">正在加载历史记录...</span>
+          </div>
+        </div>
+      )}
+
+      {status === "completed" && buyers.length > 0 && !loadingHistory && (
         <div className="px-6 py-2 bg-success/5 border-b border-success/20">
           <p className="text-sm text-success font-medium">✓ {statusMsg}</p>
         </div>
       )}
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-6">
+      <div className="flex-1 overflow-auto p-6" onClick={() => showHistory && setShowHistory(false)}>
         {status === "idle" && buyers.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="text-5xl mb-4">🎯</div>
@@ -201,6 +316,17 @@ export default function BuyersPage() {
             >
               开始智能匹配 →
             </button>
+            {sessions.length > 0 && (
+              <div className="mt-8 text-sm text-muted">
+                或查看{" "}
+                <button
+                  className="text-primary hover:underline"
+                  onClick={() => setShowHistory(true)}
+                >
+                  {sessions.length} 条历史搜索记录
+                </button>
+              </div>
+            )}
             <div className="mt-8 grid grid-cols-3 gap-4 text-sm">
               {[
                 { icon: "📦", title: "海关贸易数据", desc: "真实进口记录" },

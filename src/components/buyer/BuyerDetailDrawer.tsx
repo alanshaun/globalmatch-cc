@@ -39,12 +39,18 @@ function ScoreBar({ label, score, reason }: { label: string; score: number; reas
 export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
   const [activeTab, setActiveTab] = useState<TabId>("why");
   const [selectedSubject, setSelectedSubject] = useState<"A" | "B">("A");
-  const [editedBody, setEditedBody] = useState(buyer.emailDraft.body);
+  const [editedBody, setEditedBody] = useState(buyer.emailDraft?.body ?? "");
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
 
+  // Normalize potentially-undefined fields (e.g. when loaded from DB)
+  const contacts = buyer.contacts ?? [];
+  const intentSignals = buyer.intentSignals ?? [];
+  const redFlags = buyer.redFlags ?? [];
+  const emailDraft = buyer.emailDraft ?? { subjectA: "", subjectB: "", body: "" };
+
   const handleSendEmail = async () => {
-    const topContact = buyer.contacts[0];
+    const topContact = contacts[0];
     if (!topContact?.email) {
       alert("没有找到联系邮箱");
       return;
@@ -57,7 +63,7 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           buyerMatchId: buyer.id || "demo",
-          subject: selectedSubject === "A" ? buyer.emailDraft.subjectA : buyer.emailDraft.subjectB,
+          subject: selectedSubject === "A" ? emailDraft.subjectA : emailDraft.subjectB,
           body: editedBody,
           subjectVariant: selectedSubject,
           userId: "demo-user",
@@ -177,11 +183,11 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
                 </div>
               )}
 
-              {buyer.intentSignals.length > 0 && (
+              {intentSignals.length > 0 && (
                 <div>
                   <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">意图信号</h3>
                   <div className="space-y-2">
-                    {buyer.intentSignals.map((signal, idx) => (
+                    {intentSignals.map((signal, idx) => (
                       <div key={idx} className="flex items-start gap-2 p-3 bg-warning/5 border border-warning/20 rounded-lg">
                         <span className="text-warning">🔔</span>
                         <div>
@@ -212,9 +218,9 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
               {/* Contacts */}
               <div>
                 <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">联系人</h3>
-                {buyer.contacts.length > 0 ? (
+                {contacts.length > 0 ? (
                   <div className="space-y-2">
-                    {buyer.contacts.map((contact, idx) => (
+                    {contacts.map((contact, idx) => (
                       <div key={idx} className="p-3 border border-border rounded-lg">
                         <div className="flex items-center justify-between">
                           <div>
@@ -259,8 +265,8 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
                   <p className="text-xs text-muted mb-2">选择主题行：</p>
                   <div className="space-y-2">
                     {[
-                      { id: "A" as const, subject: buyer.emailDraft.subjectA },
-                      { id: "B" as const, subject: buyer.emailDraft.subjectB },
+                      { id: "A" as const, subject: emailDraft.subjectA },
+                      { id: "B" as const, subject: emailDraft.subjectB },
                     ].map(({ id, subject }) => (
                       <label
                         key={id}
@@ -294,7 +300,7 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
 
                 <div className="flex items-center gap-2 mt-2">
                   <button
-                    onClick={() => setEditedBody(buyer.emailDraft.body)}
+                    onClick={() => setEditedBody(emailDraft.body)}
                     className="text-xs text-muted hover:text-foreground"
                   >
                     重置
@@ -329,8 +335,8 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
               <div>
                 <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-3">四维评分详情</h3>
                 <ScoreBar label="契合度" score={buyer.fitScore} reason={buyer.matchReason} />
-                <ScoreBar label="意图强度" score={buyer.intentScore} reason={`意图信号：${buyer.intentSignals.length} 个`} />
-                <ScoreBar label="可达性" score={buyer.reachabilityScore} reason={`联系人：${buyer.contacts.length} 个`} />
+                <ScoreBar label="意图强度" score={buyer.intentScore} reason={`意图信号：${intentSignals.length} 个`} />
+                <ScoreBar label="可达性" score={buyer.reachabilityScore} reason={`联系人：${contacts.length} 个`} />
                 <ScoreBar label="数据可信度" score={buyer.confidenceScore} reason={`数据来源：${buyer.dataSource}`} />
               </div>
 
@@ -347,11 +353,11 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
           {/* Tab 4: Risks */}
           {activeTab === "risks" && (
             <div className="p-5 space-y-4">
-              {buyer.redFlags.length > 0 ? (
+              {redFlags.length > 0 ? (
                 <div>
                   <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">风险提示</h3>
                   <div className="space-y-2">
-                    {buyer.redFlags.map((flag, idx) => (
+                    {redFlags.map((flag, idx) => (
                       <div key={idx} className="flex items-start gap-2 p-3 bg-danger/5 border border-danger/20 rounded-lg">
                         <span className="text-danger text-sm">⚠️</span>
                         <p className="text-sm text-foreground">{flag}</p>
@@ -368,7 +374,7 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
 
               <div>
                 <h3 className="text-xs font-medium text-muted uppercase tracking-wide mb-2">联系方式状态</h3>
-                {buyer.contacts.map((c, idx) => (
+                {contacts.map((c, idx) => (
                   <div key={idx} className="text-sm text-foreground mb-1">
                     <span className="text-muted">{c.email}：</span>
                     <span className={
@@ -395,9 +401,9 @@ export function BuyerDetailDrawer({ buyer, onClose }: BuyerDetailDrawerProps) {
           ) : (
             <button
               onClick={handleSendEmail}
-              disabled={sending || buyer.contacts.length === 0 || !buyer.contacts[0]?.email}
+              disabled={sending || contacts.length === 0 || !contacts[0]?.email}
               className={`w-full py-3 rounded-lg text-sm font-medium transition-colors ${
-                buyer.contacts.length > 0 && buyer.contacts[0]?.email
+                contacts.length > 0 && contacts[0]?.email
                   ? "bg-primary text-white hover:bg-primary-600"
                   : "bg-gray-100 text-gray-400 cursor-not-allowed"
               }`}
