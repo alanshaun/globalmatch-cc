@@ -18,6 +18,7 @@ model User {
   buyerMatches      BuyerMatch[]
   seenCompanies     UserSeenCompany[]
   emailOutreach     EmailOutreach[]
+  interactions      InteractionTimeline[]
 }
 
 model SellerProfile {
@@ -49,6 +50,7 @@ model SearchSession {
   targetCount     Int      @default(20)
   status          String   @default("pending") // pending|running|completed|failed
   resultCount     Int      @default(0)
+  intentScore     Int      @default(0) // aggregate avg intent score for this session
   isFallback      Boolean  @default(false)
   fallbackReason  String?
   auditLog        Json     @default("{}")
@@ -86,9 +88,15 @@ model BuyerMatch {
   shipmentCount    Int      @default(0)
   lastShipment     DateTime?
   isFavorited      Boolean  @default(false)
+  competitorData   Json     @default("{}") // current supplier info: {name, country, weaknesses[]}
+  socialDynamics   Json     @default("{}") // LinkedIn/social posts: {posts[], lastUpdated}
+  reachabilityStatus Json   @default("{}") // channel reach status: {email, whatsapp, linkedin}
+  outreachHook     String?  // AI-generated 1-sentence hook for outreach
+  funnelStage      String   @default("discovered") // discovered|contacted|interested|replied
   createdAt        DateTime @default(now())
 
   emailOutreach EmailOutreach[]
+  interactions  InteractionTimeline[]
 }
 
 model UserSeenCompany {
@@ -142,4 +150,19 @@ model SearchCache {
   expiresAt DateTime
 
   @@index([expiresAt])
+}
+
+model InteractionTimeline {
+  id           String   @id @default(cuid())
+  buyerMatchId String
+  buyerMatch   BuyerMatch @relation(fields: [buyerMatchId], references: [id])
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  type         String   // email_sent|email_opened|email_clicked|profile_viewed|whatsapp_sent|linkedin_visited|note_added|stage_changed
+  metadata     Json     @default("{}") // e.g. {subject, body, note, fromStage, toStage}
+  occurredAt   DateTime @default(now())
+
+  @@index([buyerMatchId])
+  @@index([userId])
+  @@index([occurredAt])
 }

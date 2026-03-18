@@ -14,6 +14,8 @@ import { detectIntentSignals } from "./intentSignals";
 import { analyzeBuyer, generateEmail, scrapeWebsiteContent } from "./buyerAnalyzer";
 import { detectSupplierWeakness } from "./supplierWeakness";
 import type { SupplierWeaknessResult } from "./supplierWeakness";
+import { runIntelligenceAgent } from "./intelligenceAgent";
+import type { CompetitorData, SocialDynamics } from "./intelligenceAgent";
 import { COMPETITOR_DOMAIN_BLACKLIST, GENERIC_DOMAIN_BLACKLIST, COUNTRY_SEARCH_TERMS } from "@/lib/constants";
 import { llmCall } from "@/lib/llmClient";
 import type { ProductProfile } from "./productAnalyzer";
@@ -59,6 +61,12 @@ export interface BuyerResult {
   bestContactTiming: string;
   redFlags: string[];
   supplierWeaknessSignal?: SupplierWeaknessResult;
+  // Intelligence Agent fields
+  competitorData?: CompetitorData;
+  socialDynamics?: SocialDynamics;
+  outreachHook?: string;
+  reachabilityStatus?: { email: boolean; whatsapp: boolean; linkedin: boolean };
+  funnelStage?: string;
 }
 
 interface AuditLog {
@@ -384,11 +392,19 @@ export async function runBuyerSearch(
     await Promise.allSettled(
       batch.map(async (candidate) => {
         try {
-          // Scrape website + detect signals + supplier weakness concurrently
-          const [websiteContent, intentSignals, weaknessResult] = await Promise.allSettled([
+          // Scrape website + detect signals + supplier weakness + intelligence agent concurrently
+          const [websiteContent, intentSignals, weaknessResult, intelResult] = await Promise.allSettled([
             scrapeWebsiteContent(candidate.domain),
             detectIntentSignals(candidate.companyName, candidate.domain),
             detectSupplierWeakness(candidate.companyName, candidate.domain),
+            runIntelligenceAgent(
+              candidate.companyName,
+              candidate.domain,
+              profile.searchKeywords ?? [],
+              profile.productName,
+              "", // whyTheyNeedUs filled in after analysis
+              contactMap.get(candidate.domain)?.[0]?.name
+            ),
           ]);
 
           const content =
@@ -397,6 +413,8 @@ export async function runBuyerSearch(
             intentSignals.status === "fulfilled" ? intentSignals.value : [];
           const supplierWeakness =
             weaknessResult.status === "fulfilled" ? weaknessResult.value : undefined;
+          const intel =
+            intelResult.status === "fulfilled" ? intelResult.value : undefined;
 
           // Analyze buyer
           const analysis = await analyzeBuyer(
@@ -463,6 +481,15 @@ export async function runBuyerSearch(
             redFlags: analysis.redFlags,
             supplierWeaknessSignal:
               supplierWeakness?.hasWeaknessSignal ? supplierWeakness : undefined,
+            competitorData: intel?.competitorData,
+            socialDynamics: intel?.socialDynamics,
+            outreachHook: intel?.outreachHook || "",
+            reachabilityStatus: {
+              email: contacts.some((c) => c.email && c.emailQuality !== "none"),
+              whatsapp: false,
+              linkedin: contacts.some((c) => !!c.linkedinUrl),
+            },
+            funnelStage: "discovered",
           };
 
           // Save to DB
@@ -492,6 +519,14 @@ export async function runBuyerSearch(
                 fromCache: buyer.fromCache,
                 shipmentCount: buyer.shipmentCount,
                 lastShipment: buyer.lastShipment ? new Date(buyer.lastShipment) : null,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                competitorData: (buyer.competitorData ?? {}) as any,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                socialDynamics: (buyer.socialDynamics ?? {}) as any,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                reachabilityStatus: (buyer.reachabilityStatus ?? {}) as any,
+                outreachHook: buyer.outreachHook ?? "",
+                funnelStage: "discovered",
               },
             });
             buyer.id = saved.id;

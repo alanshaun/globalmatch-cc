@@ -12,6 +12,8 @@ export async function PATCH(
       data: {
         isFavorited:
           body.isFavorited !== undefined ? body.isFavorited : undefined,
+        funnelStage:
+          body.funnelStage !== undefined ? body.funnelStage : undefined,
       },
     });
     return NextResponse.json({ buyer });

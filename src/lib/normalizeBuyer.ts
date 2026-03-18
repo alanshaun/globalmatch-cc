@@ -46,6 +46,19 @@ export function normalizeBuyer(raw: any): BuyerResult {
     // Object fields
     emailDraft: normalizeEmailDraft(raw.emailDraft),
     supplierWeaknessSignal: normalizeSupplierWeaknessSignal(raw.supplierWeaknessSignal),
+
+    // Intelligence Agent fields
+    competitorData: raw.competitorData && typeof raw.competitorData === "object" ? raw.competitorData : undefined,
+    socialDynamics: raw.socialDynamics && typeof raw.socialDynamics === "object" ? raw.socialDynamics : undefined,
+    outreachHook: raw.outreachHook ? str(raw.outreachHook) : undefined,
+    reachabilityStatus: raw.reachabilityStatus && typeof raw.reachabilityStatus === "object"
+      ? {
+          email: Boolean(raw.reachabilityStatus.email),
+          whatsapp: Boolean(raw.reachabilityStatus.whatsapp),
+          linkedin: Boolean(raw.reachabilityStatus.linkedin),
+        }
+      : undefined,
+    funnelStage: str(raw.funnelStage) || "discovered",
   };
 }
 
@@ -126,8 +139,9 @@ function normalizeSupplierWeaknessSignal(s: any): BuyerResult["supplierWeaknessS
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const x = sig as any;
       return {
-        source: str(x?.source) || "unknown",
-        confidence: str(x?.confidence) || "low",
+        type: (str(x?.type) || "quality") as "quality" | "delivery" | "price" | "service" | "compliance",
+        source: (str(x?.source) || "google") as "google" | "news" | "hiring",
+        confidence: (str(x?.confidence) || "low") as "high" | "medium" | "low",
         description: str(x?.description),
       };
     }),
@@ -146,5 +160,10 @@ function emptyBuyer(): BuyerResult {
     contacts: [], intentSignals: [], redFlags: [],
     emailDraft: { subjectA: "", subjectB: "", body: "" },
     supplierWeaknessSignal: undefined,
+    competitorData: undefined,
+    socialDynamics: undefined,
+    outreachHook: undefined,
+    reachabilityStatus: undefined,
+    funnelStage: "discovered",
   };
 }

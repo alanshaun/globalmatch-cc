@@ -7,9 +7,11 @@ import { BuyerCard } from "@/components/buyer/BuyerCard";
 import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
 import { ErrorBoundary, DrawerErrorBoundary } from "@/components/ErrorBoundary";
 import { normalizeBuyer, normalizeBuyerArray } from "@/lib/normalizeBuyer";
+import { IntentPopupContainer, useIntentEvents } from "@/components/buyer/IntentPopup";
 import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
 import type { SellerProfile } from "@/app/(dashboard)/setup/page";
 import type { SupplierWeaknessResult } from "@/services/supplierWeakness";
+import type { CompetitorData, SocialDynamics } from "@/services/intelligenceAgent";
 
 export interface BuyerResult {
   id?: string;
@@ -52,6 +54,12 @@ export interface BuyerResult {
   bestContactTiming: string;
   redFlags: string[];
   supplierWeaknessSignal?: SupplierWeaknessResult;
+  // Intelligence Agent fields
+  competitorData?: CompetitorData;
+  socialDynamics?: SocialDynamics;
+  outreachHook?: string;
+  reachabilityStatus?: { email: boolean; whatsapp: boolean; linkedin: boolean };
+  funnelStage?: string;
 }
 
 interface PastSession {
@@ -82,6 +90,8 @@ export default function BuyersPage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [savedProfile, setSavedProfile] = useState<SellerProfile | null>(null);
+
+  const { toasts, pushEvent, dismiss } = useIntentEvents();
 
   // Filter states
   const [filterCountry, setFilterCountry] = useState("all");
@@ -125,6 +135,24 @@ export default function BuyersPage() {
       setStatusMsg("加载历史记录失败");
     } finally {
       setLoadingHistory(false);
+    }
+  };
+
+  const handleStageChange = (buyerIdOrDomain: string, stage: string) => {
+    setBuyers((prev) =>
+      prev.map((b) =>
+        b.id === buyerIdOrDomain || b.domain === buyerIdOrDomain
+          ? { ...b, funnelStage: stage }
+          : b
+      )
+    );
+    // Track via API (best effort)
+    if (buyerIdOrDomain.length > 10) {
+      fetch(`/api/buyers/${buyerIdOrDomain}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ funnelStage: stage }),
+      }).catch(() => {});
     }
   };
 
@@ -180,14 +208,23 @@ export default function BuyersPage() {
           setProgress(event.progress || 0);
           setFoundCount(event.foundCount || 0);
         } else if (event.type === "new_buyer") {
+          const newBuyer = normalizeBuyer(event.data);
           setBuyers((prev) => {
-            const updated = [...prev, normalizeBuyer(event.data)];
+            const updated = [...prev, newBuyer];
             updated.sort((a, b) => b.matchScore - a.matchScore);
             buyerCountRef.current = updated.length;
             return updated;
           });
           setFoundCount(event.foundCount || 0);
           setProgress(event.progress || 0);
+          // Trigger intent popup for high-score buyers
+          if (newBuyer.matchScore >= 70) {
+            pushEvent({
+              companyName: newBuyer.companyName,
+              event: "new_buyer_found",
+              detail: `匹配度 ${newBuyer.matchScore} · ${newBuyer.country}`,
+            });
+          }
         } else if (event.type === "completed") {
           setStatus("completed");
           setFoundCount(event.foundCount || 0);
@@ -243,6 +280,7 @@ export default function BuyersPage() {
 
   return (
     <div className="flex flex-col h-screen">
+      <IntentPopupContainer toasts={toasts} onDismiss={dismiss} />
       {/* Header */}
       <div className="px-6 py-4 border-b border-border bg-white flex items-center justify-between">
         <div>
@@ -510,6 +548,7 @@ export default function BuyersPage() {
                     <BuyerCard
                       buyer={buyer}
                       onViewDetail={() => setSelectedBuyer(buyer)}
+                      onStageChange={handleStageChange}
                     />
                   </ErrorBoundary>
                 </div>
