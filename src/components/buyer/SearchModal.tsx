@@ -19,10 +19,8 @@ interface SearchModalProps {
   }) => void;
 }
 
-const COUNT_OPTIONS = [10, 20, 30, 50];
-const BUYER_TYPE_OPTIONS = ["进口商", "分销商", "零售商", "品牌商", "终端采购"];
-
-type InputMode = "manual" | "file" | "url";
+const COUNT_OPTIONS = [10, 20, 30, 50, 100];
+const BUYER_TYPE_OPTIONS = ["进口商", "分销商", "零售商", "品牌商", "终端采购", "OEM客户", "跨境电商"];
 
 export function SearchModal({ onClose, onSearch }: SearchModalProps) {
   const [productName, setProductName] = useState("");
@@ -36,8 +34,9 @@ export function SearchModal({ onClose, onSearch }: SearchModalProps) {
   const [buyerTypes, setBuyerTypes] = useState<string[]>([]);
   const [excludeKeywords, setExcludeKeywords] = useState("");
 
-  // Input mode
-  const [inputMode, setInputMode] = useState<InputMode>("manual");
+  // Import panel state
+  const [showFilePanel, setShowFilePanel] = useState(false);
+  const [showUrlPanel, setShowUrlPanel] = useState(false);
 
   // File upload state
   const [isDragging, setIsDragging] = useState(false);
@@ -91,10 +90,10 @@ export function SearchModal({ onClose, onSearch }: SearchModalProps) {
     if (profile.productDescription) setDescription(profile.productDescription);
     if (profile.hsCode) setHsCode(profile.hsCode);
     if (profile.priceRange) setPriceRange(profile.priceRange);
-    setInputMode("manual");
+    setShowFilePanel(false);
+    setShowUrlPanel(false);
   };
 
-  // File parsing
   const processFile = useCallback(async (file: File) => {
     const allowed = [
       "application/pdf",
@@ -133,7 +132,6 @@ export function SearchModal({ onClose, onSearch }: SearchModalProps) {
       });
     } catch (e) {
       setFileError(e instanceof Error ? e.message : "解析失败，请手动填写");
-      setIsParsingFile(false);
     } finally {
       setIsParsingFile(false);
     }
@@ -155,7 +153,6 @@ export function SearchModal({ onClose, onSearch }: SearchModalProps) {
     e.target.value = "";
   };
 
-  // URL parsing
   const handleParseUrl = async () => {
     const lines = urlInput
       .split("\n")
@@ -166,7 +163,6 @@ export function SearchModal({ onClose, onSearch }: SearchModalProps) {
     setUrlError("");
     setIsParsingUrl(true);
 
-    // Use the first valid URL
     const url = lines[0];
     try {
       const res = await fetch("/api/parse-url", {
@@ -208,45 +204,41 @@ export function SearchModal({ onClose, onSearch }: SearchModalProps) {
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Input Mode Tabs */}
-          <div className="flex gap-1 p-1 bg-gray-100 rounded-lg">
-            {(["manual", "file", "url"] as InputMode[]).map((mode) => {
-              const labels: Record<InputMode, string> = {
-                manual: "手动填写",
-                file: "上传文件",
-                url: "粘贴链接",
-              };
-              return (
-                <button
-                  key={mode}
-                  onClick={() => setInputMode(mode)}
-                  className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    inputMode === mode
-                      ? "bg-white text-foreground shadow-sm"
-                      : "text-muted hover:text-foreground"
-                  }`}
-                >
-                  {labels[mode]}
-                </button>
-              );
-            })}
+
+          {/* Import shortcuts */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted">快速导入产品信息：</span>
+            <button
+              onClick={() => { setShowFilePanel((v) => !v); setShowUrlPanel(false); }}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                showFilePanel ? "bg-primary text-white border-primary" : "border-border text-foreground hover:border-primary/50"
+              }`}
+            >
+              📎 上传文件
+            </button>
+            <button
+              onClick={() => { setShowUrlPanel((v) => !v); setShowFilePanel(false); }}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                showUrlPanel ? "bg-primary text-white border-primary" : "border-border text-foreground hover:border-primary/50"
+              }`}
+            >
+              🔗 粘贴链接
+            </button>
           </div>
 
-          {/* File Upload Mode */}
-          {inputMode === "file" && (
-            <div className="space-y-3">
-              <p className="text-xs text-muted">
-                上传产品资料，AI 自动识别并填写产品名称和描述
-              </p>
+          {/* File Upload Panel */}
+          {showFilePanel && (
+            <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-border">
+              <p className="text-xs text-muted">上传产品资料，AI 自动识别并填写产品名称和描述</p>
               <div
                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleFileDrop}
                 onClick={() => !isParsingFile && fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center gap-3 transition-colors cursor-pointer ${
+                className={`border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center gap-2 transition-colors cursor-pointer ${
                   isDragging
                     ? "border-primary bg-primary/5"
-                    : "border-border hover:border-primary/50 hover:bg-gray-50"
+                    : "border-border hover:border-primary/50 hover:bg-white"
                 } ${isParsingFile ? "pointer-events-none" : ""}`}
               >
                 <input
@@ -258,270 +250,231 @@ export function SearchModal({ onClose, onSearch }: SearchModalProps) {
                 />
                 {isParsingFile ? (
                   <>
-                    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                    <p className="text-sm text-foreground font-medium">解析中...</p>
-                    <p className="text-xs text-muted">{parsedFileName}</p>
+                    <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <p className="text-xs text-foreground font-medium">解析中... {parsedFileName}</p>
                   </>
                 ) : (
                   <>
-                    <div className="w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center text-2xl">
-                      📄
-                    </div>
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-foreground">
-                        拖拽文件到这里，或点击上传
-                      </p>
-                      <p className="text-xs text-muted mt-1">
-                        支持 PDF、Word(.docx)、图片(JPG/PNG/WebP)，最大 10MB
-                      </p>
-                    </div>
+                    <span className="text-xl">📄</span>
+                    <p className="text-xs font-medium text-foreground">拖拽或点击上传</p>
+                    <p className="text-[10px] text-muted">PDF、Word、图片，最大10MB</p>
                   </>
                 )}
               </div>
               {fileError && (
                 <p className="text-xs text-danger bg-danger/5 px-3 py-2 rounded-lg">{fileError}</p>
               )}
-              <button
-                onClick={() => setInputMode("manual")}
-                className="text-xs text-muted hover:text-foreground underline"
-              >
-                跳过，直接手动填写
-              </button>
             </div>
           )}
 
-          {/* URL Mode */}
-          {inputMode === "url" && (
-            <div className="space-y-3">
-              <p className="text-xs text-muted">
-                粘贴产品页或公司官网链接，AI 自动提取产品信息填入表单
-              </p>
+          {/* URL Panel */}
+          {showUrlPanel && (
+            <div className="space-y-2 p-3 bg-gray-50 rounded-xl border border-border">
+              <p className="text-xs text-muted">粘贴产品页或官网链接，AI 自动提取产品信息</p>
               <textarea
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}
-                placeholder={"https://www.yourcompany.com/products/xxx\nhttps://alibaba.com/product/..."}
-                rows={3}
-                className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none font-mono"
+                placeholder="https://www.yourcompany.com/products/xxx"
+                rows={2}
+                className="w-full px-3 py-2 border border-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none font-mono bg-white"
               />
               {urlError && (
                 <p className="text-xs text-danger bg-danger/5 px-3 py-2 rounded-lg">{urlError}</p>
               )}
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={handleParseUrl}
-                  disabled={!urlInput.trim() || isParsingUrl}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    urlInput.trim() && !isParsingUrl
-                      ? "bg-primary text-white hover:bg-primary-600"
-                      : "bg-gray-100 text-gray-400 cursor-not-allowed"
-                  }`}
-                >
-                  {isParsingUrl && (
-                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  )}
-                  {isParsingUrl ? "正在抓取..." : "提取产品信息"}
-                </button>
-                <button
-                  onClick={() => setInputMode("manual")}
-                  className="text-xs text-muted hover:text-foreground underline"
-                >
-                  手动填写
-                </button>
-              </div>
+              <button
+                onClick={handleParseUrl}
+                disabled={!urlInput.trim() || isParsingUrl}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  urlInput.trim() && !isParsingUrl
+                    ? "bg-primary text-white hover:bg-primary-600"
+                    : "bg-gray-100 text-gray-400 cursor-not-allowed"
+                }`}
+              >
+                {isParsingUrl && (
+                  <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                )}
+                {isParsingUrl ? "正在抓取..." : "提取产品信息"}
+              </button>
             </div>
           )}
 
-          {/* Manual Form — always shown in manual mode, also shown after parse to review */}
-          {inputMode === "manual" && (
-            <>
-              {/* Product Name */}
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">
-                  产品名称 <span className="text-danger">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={productName}
-                  onChange={(e) => setProductName(e.target.value)}
-                  placeholder="如：气泵、LED灯、电动工具..."
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
-                />
-              </div>
+          {/* Product Name */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">
+              产品名称 <span className="text-danger">*</span>
+            </label>
+            <input
+              type="text"
+              value={productName}
+              onChange={(e) => setProductName(e.target.value)}
+              placeholder="如：气泵、LED灯、电动工具..."
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+            />
+          </div>
 
-              {/* Description */}
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">
-                  产品描述
-                </label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="描述核心功能和优势，有助于AI更精准匹配买家..."
-                  rows={3}
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
-                />
-              </div>
+          {/* Description */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">
+              产品描述
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="描述核心功能和优势，有助于AI更精准匹配买家..."
+              rows={3}
+              className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"
+            />
+          </div>
 
-              {/* Target Markets */}
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  目标市场 <span className="text-danger">*</span>
-                  <span className="text-muted font-normal ml-1">（至少选一个）</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {TARGET_MARKETS.map((market) => (
-                    <button
-                      key={market.value}
-                      onClick={() => toggleCountry(market.value)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors ${
-                        selectedCountries.includes(market.value)
-                          ? "bg-primary text-white border-primary"
-                          : "bg-white text-foreground border-border hover:border-primary/50"
-                      }`}
-                    >
-                      <span>{market.flag}</span>
-                      <span>{market.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Count */}
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-2">
-                  搜索数量
-                </label>
-                <div className="flex gap-2">
-                  {COUNT_OPTIONS.map((n) => (
-                    <button
-                      key={n}
-                      onClick={() => setTargetCount(n)}
-                      className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${
-                        targetCount === n
-                          ? "bg-primary text-white border-primary"
-                          : "bg-white text-foreground border-border hover:border-primary/50"
-                      }`}
-                    >
-                      {n}家
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Advanced Options */}
-              <div>
+          {/* Target Markets */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              目标市场 <span className="text-danger">*</span>
+              <span className="text-muted font-normal ml-1">（至少选一个）</span>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {TARGET_MARKETS.map((market) => (
                 <button
-                  onClick={() => setShowAdvanced(!showAdvanced)}
-                  className="text-sm text-primary hover:underline flex items-center gap-1"
+                  key={market.value}
+                  onClick={() => toggleCountry(market.value)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm border transition-colors ${
+                    selectedCountries.includes(market.value)
+                      ? "bg-primary text-white border-primary"
+                      : "bg-white text-foreground border-border hover:border-primary/50"
+                  }`}
                 >
-                  <span>{showAdvanced ? "▼" : "▶"}</span>
-                  更多筛选
+                  <span>{market.flag}</span>
+                  <span>{market.label}</span>
                 </button>
+              ))}
+            </div>
+          </div>
 
-                {showAdvanced && (
-                  <div className="mt-3 space-y-4 p-4 bg-gray-50 rounded-lg">
-                    <div>
-                      <label className="block text-xs font-medium text-foreground mb-1">
-                        HS编码（选填，填了更精准）
-                      </label>
-                      <input
-                        type="text"
-                        value={hsCode}
-                        onChange={(e) => setHsCode(e.target.value)}
-                        placeholder="如：8414.80"
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
+          {/* Count */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-2">
+              搜索数量
+            </label>
+            <div className="flex gap-2 flex-wrap">
+              {COUNT_OPTIONS.map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setTargetCount(n)}
+                  className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
+                    targetCount === n
+                      ? "bg-primary text-white border-primary"
+                      : "bg-white text-foreground border-border hover:border-primary/50"
+                  }`}
+                >
+                  {n}家
+                </button>
+              ))}
+            </div>
+          </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-foreground mb-1">
-                        价格区间
-                      </label>
-                      <input
-                        type="text"
-                        value={priceRange}
-                        onChange={(e) => setPriceRange(e.target.value)}
-                        placeholder="如：$5-$20/件"
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
+          {/* Advanced Options */}
+          <div>
+            <button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="text-sm text-primary hover:underline flex items-center gap-1"
+            >
+              <span>{showAdvanced ? "▼" : "▶"}</span>
+              更多筛选
+            </button>
 
-                    <div>
-                      <label className="block text-xs font-medium text-foreground mb-1">
-                        最小起订量 MOQ
-                      </label>
-                      <input
-                        type="text"
-                        value={moq}
-                        onChange={(e) => setMoq(e.target.value)}
-                        placeholder="如：500件"
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
+            {showAdvanced && (
+              <div className="mt-3 space-y-4 p-4 bg-gray-50 rounded-lg">
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    HS编码（选填，填了更精准）
+                  </label>
+                  <input
+                    type="text"
+                    value={hsCode}
+                    onChange={(e) => setHsCode(e.target.value)}
+                    placeholder="如：8414.80"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-foreground mb-2">
-                        目标买家类型（多选）
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {BUYER_TYPE_OPTIONS.map((type) => (
-                          <button
-                            key={type}
-                            onClick={() => toggleBuyerType(type)}
-                            className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                              buyerTypes.includes(type)
-                                ? "bg-primary text-white border-primary"
-                                : "bg-white text-foreground border-border"
-                            }`}
-                          >
-                            {type}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    价格区间
+                  </label>
+                  <input
+                    type="text"
+                    value={priceRange}
+                    onChange={(e) => setPriceRange(e.target.value)}
+                    placeholder="如：$5-$20/件"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
 
-                    <div>
-                      <label className="block text-xs font-medium text-foreground mb-1">
-                        排除关键词（逗号分隔）
-                      </label>
-                      <input
-                        type="text"
-                        value={excludeKeywords}
-                        onChange={(e) => setExcludeKeywords(e.target.value)}
-                        placeholder="如：零售, 个人消费者"
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-                      />
-                    </div>
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    最小起订量 MOQ
+                  </label>
+                  <input
+                    type="text"
+                    value={moq}
+                    onChange={(e) => setMoq(e.target.value)}
+                    placeholder="如：500件"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-2">
+                    目标买家类型（多选）
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {BUYER_TYPE_OPTIONS.map((type) => (
+                      <button
+                        key={type}
+                        onClick={() => toggleBuyerType(type)}
+                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                          buyerTypes.includes(type)
+                            ? "bg-primary text-white border-primary"
+                            : "bg-white text-foreground border-border"
+                        }`}
+                      >
+                        {type}
+                      </button>
+                    ))}
                   </div>
-                )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-foreground mb-1">
+                    排除关键词（逗号分隔）
+                  </label>
+                  <input
+                    type="text"
+                    value={excludeKeywords}
+                    onChange={(e) => setExcludeKeywords(e.target.value)}
+                    placeholder="如：零售, 个人消费者"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
               </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-border flex items-center justify-between">
           <p className="text-xs text-muted">已搜索过的公司不会重复出现</p>
-          {inputMode === "manual" ? (
-            <button
-              onClick={handleSubmit}
-              disabled={!isValid}
-              className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${
-                isValid
-                  ? "bg-primary text-white hover:bg-primary-600"
-                  : "bg-gray-100 text-gray-400 cursor-not-allowed"
-              }`}
-            >
-              开始智能匹配 →
-            </button>
-          ) : (
-            <button
-              onClick={() => setInputMode("manual")}
-              className="px-5 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-600 hover:bg-gray-200 transition-colors"
-            >
-              手动填写 →
-            </button>
-          )}
+          <button
+            onClick={handleSubmit}
+            disabled={!isValid}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${
+              isValid
+                ? "bg-primary text-white hover:bg-primary-600"
+                : "bg-gray-100 text-gray-400 cursor-not-allowed"
+            }`}
+          >
+            开始智能匹配 →
+          </button>
         </div>
       </div>
     </div>

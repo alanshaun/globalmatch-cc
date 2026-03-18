@@ -18,8 +18,9 @@ interface Supplier {
   leadTime: string;
 }
 
-const REGION_OPTIONS = ["中国优先", "东南亚", "全球"];
-const COUNT_OPTIONS = [5, 10, 20];
+const REGION_OPTIONS = ["中国优先", "越南", "东南亚（越南/泰国/印尼）", "印度", "东欧", "全球最优"];
+const COUNT_OPTIONS = [5, 10, 20, 30, 50];
+const CERT_REQ_OPTIONS = ["ISO9001", "CE", "RoHS", "FCC", "UL", "FDA", "BSCI", "SA8000"];
 
 function ScoreBar({ score, color }: { score: number; color: string }) {
   return (
@@ -187,6 +188,7 @@ export default function SupplyChainPage() {
   const [budget, setBudget] = useState("");
   const [certifications, setCertifications] = useState<string[]>([]);
   const [count, setCount] = useState(10);
+  const [showCerts, setShowCerts] = useState(false);
   const [loading, setLoading] = useState(false);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
@@ -230,7 +232,7 @@ export default function SupplyChainPage() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium mb-1.5">目标地区</label>
+                <label className="block text-sm font-medium mb-1.5">供应商来源地区</label>
                 <select
                   value={region}
                   onChange={(e) => setRegion(e.target.value)}
@@ -264,8 +266,38 @@ export default function SupplyChainPage() {
               />
             </div>
 
+            {/* Certification requirements */}
+            <div>
+              <button
+                onClick={() => setShowCerts((v) => !v)}
+                className="text-sm text-primary hover:underline flex items-center gap-1 mb-2"
+              >
+                <span>{showCerts ? "▼" : "▶"}</span>
+                认证要求（选填）
+              </button>
+              {showCerts && (
+                <div className="flex flex-wrap gap-2 p-3 bg-gray-50 rounded-lg">
+                  {CERT_REQ_OPTIONS.map((cert) => (
+                    <button
+                      key={cert}
+                      onClick={() => setCertifications((prev) =>
+                        prev.includes(cert) ? prev.filter((c) => c !== cert) : [...prev, cert]
+                      )}
+                      className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                        certifications.includes(cert)
+                          ? "bg-primary text-white border-primary"
+                          : "bg-white border-border hover:border-primary/50"
+                      }`}
+                    >
+                      {cert}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 {COUNT_OPTIONS.map((n) => (
                   <button
                     key={n}

@@ -91,12 +91,21 @@ export default function TrustAssetsPage() {
   return (
     <div className="flex flex-col h-screen">
       <div className="px-6 py-4 border-b border-border bg-white">
-        <h1 className="text-base font-semibold">让买家更信你 · 信任资料包</h1>
-        <p className="text-sm text-muted">买家 Google 你之后第一眼看到什么？这里生成你的英文介绍 + 诊断你缺了哪些信任背书</p>
+        <h1 className="text-base font-semibold">让买家更信你 · 供应商信任资料包</h1>
+        <p className="text-sm text-muted">帮你（作为出口商/供应商）生成英文自我介绍、LinkedIn简介、邮件签名 · 买家收到开发信后会 Google 你，这些内容决定第一印象</p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-2xl mx-auto">
+          {/* Role clarification banner */}
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+            <span className="text-blue-500 text-lg shrink-0">🏭</span>
+            <div>
+              <p className="text-sm font-medium text-blue-800">这是供应商/出口商专用</p>
+              <p className="text-xs text-blue-600 mt-0.5">填写你自己公司的信息，生成向海外买家展示的英文信任材料（不是买家背调）</p>
+            </div>
+          </div>
+
           <div className="bg-white border border-border rounded-xl p-6 mb-6 space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>

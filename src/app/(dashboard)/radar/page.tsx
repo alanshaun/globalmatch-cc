@@ -23,16 +23,32 @@ const RECOMMENDATION_COLORS = {
   时机未到: "bg-warning/10 text-warning border-warning/30",
 };
 
+const CERT_OPTIONS = ["ISO9001", "CE", "RoHS", "FCC", "UL", "FDA", "IATF16949", "BSCI"];
+const CAPACITY_OPTIONS = ["1万件/月以下", "1-10万件/月", "10-100万件/月", "100万件/月以上"];
+const EXPORT_EXP_OPTIONS = ["无出口经验", "有少量出口", "有稳定出口客户", "出口占比50%+"];
+
 export default function RadarPage() {
   const [capability, setCapability] = useState("");
   const [markets, setMarkets] = useState<string[]>(["美国"]);
   const [loading, setLoading] = useState(false);
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
 
+  // Extra fields
+  const [capacity, setCapacity] = useState("");
+  const [priceRange, setPriceRange] = useState("");
+  const [certs, setCerts] = useState<string[]>([]);
+  const [exportExp, setExportExp] = useState("");
+  const [competitors, setCompetitors] = useState("");
+  const [showExtra, setShowExtra] = useState(false);
+
   const toggleMarket = (m: string) => {
     setMarkets((prev) =>
       prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
     );
+  };
+
+  const toggleCert = (c: string) => {
+    setCerts((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
   };
 
   const handleAnalyze = async () => {
@@ -43,7 +59,7 @@ export default function RadarPage() {
       const res = await fetch("/api/radar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ capability, markets }),
+        body: JSON.stringify({ capability, markets, capacity, priceRange, certifications: certs, exportExp, competitors }),
       });
       const data = await res.json();
       setRecommendations(data.recommendations || []);
@@ -62,8 +78,9 @@ export default function RadarPage() {
       <div className="flex-1 overflow-auto p-6">
         <div className="max-w-2xl mx-auto">
           <div className="bg-white border border-border rounded-xl p-6 mb-6 space-y-4">
+            {/* Factory capability */}
             <div>
-              <label className="block text-sm font-medium mb-1.5">工厂能力 *</label>
+              <label className="block text-sm font-medium mb-1.5">工厂核心能力 *</label>
               <textarea
                 value={capability}
                 onChange={(e) => setCapability(e.target.value)}
@@ -73,8 +90,9 @@ export default function RadarPage() {
               />
             </div>
 
+            {/* Target markets */}
             <div>
-              <label className="block text-sm font-medium mb-2">目标出口市场</label>
+              <label className="block text-sm font-medium mb-2">目标出口市场 *（至少选一个）</label>
               <div className="flex flex-wrap gap-2">
                 {TARGET_MARKETS.map((m) => (
                   <button
@@ -92,9 +110,106 @@ export default function RadarPage() {
               </div>
             </div>
 
+            {/* Capacity selection */}
+            <div>
+              <label className="block text-sm font-medium mb-2">月产能</label>
+              <div className="flex flex-wrap gap-2">
+                {CAPACITY_OPTIONS.map((c) => (
+                  <button
+                    key={c}
+                    onClick={() => setCapacity(capacity === c ? "" : c)}
+                    className={`px-3 py-1.5 rounded-full text-xs border transition-colors ${
+                      capacity === c
+                        ? "bg-primary text-white border-primary"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Export experience */}
+            <div>
+              <label className="block text-sm font-medium mb-2">出口经验</label>
+              <div className="flex flex-wrap gap-2">
+                {EXPORT_EXP_OPTIONS.map((e) => (
+                  <button
+                    key={e}
+                    onClick={() => setExportExp(exportExp === e ? "" : e)}
+                    className={`px-3 py-1.5 rounded-full text-xs border transition-colors ${
+                      exportExp === e
+                        ? "bg-primary text-white border-primary"
+                        : "border-border hover:border-primary/50"
+                    }`}
+                  >
+                    {e}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Toggle extra options */}
+            <button
+              onClick={() => setShowExtra((v) => !v)}
+              className="text-sm text-primary hover:underline flex items-center gap-1"
+            >
+              <span>{showExtra ? "▼" : "▶"}</span>
+              更多筛选条件
+            </button>
+
+            {showExtra && (
+              <div className="space-y-4 p-4 bg-gray-50 rounded-lg">
+                {/* Certifications */}
+                <div>
+                  <label className="block text-xs font-medium mb-2">已有认证</label>
+                  <div className="flex flex-wrap gap-2">
+                    {CERT_OPTIONS.map((cert) => (
+                      <button
+                        key={cert}
+                        onClick={() => toggleCert(cert)}
+                        className={`px-3 py-1 rounded-full text-xs border transition-colors ${
+                          certs.includes(cert)
+                            ? "bg-primary text-white border-primary"
+                            : "bg-white border-border hover:border-primary/50"
+                        }`}
+                      >
+                        {cert}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Price range */}
+                <div>
+                  <label className="block text-xs font-medium mb-1">目标价格带（FOB）</label>
+                  <input
+                    type="text"
+                    value={priceRange}
+                    onChange={(e) => setPriceRange(e.target.value)}
+                    placeholder="如：$5-$20/件"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+
+                {/* Competitors */}
+                <div>
+                  <label className="block text-xs font-medium mb-1">主要竞争对手（选填）</label>
+                  <input
+                    type="text"
+                    value={competitors}
+                    onChange={(e) => setCompetitors(e.target.value)}
+                    placeholder="如：某宁波同行、某义乌工厂"
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30"
+                  />
+                </div>
+              </div>
+            )}
+
             <button
               onClick={handleAnalyze}
-              disabled={loading || !capability.trim()}
+              disabled={loading || !capability.trim() || markets.length === 0}
               className="w-full py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
             >
               {loading ? "正在分析市场..." : "开始选品分析 →"}
