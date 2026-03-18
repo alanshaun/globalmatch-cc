@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import type { SellerProfile } from "@/app/(dashboard)/setup/page";
+import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
 
 interface TrustAssets {
   aboutUs: string;
@@ -50,6 +52,19 @@ export default function TrustAssetsPage() {
   const [loading, setLoading] = useState(false);
   const [assets, setAssets] = useState<TrustAssets | null>(null);
 
+  // Pre-fill from global seller profile
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SELLER_PROFILE_KEY);
+      if (!raw) return;
+      const p: SellerProfile = JSON.parse(raw);
+      if (p.companyName) setCompanyName(p.companyName);
+      if (p.productName) setProducts(p.productName);
+      if (p.certifications?.length) setCertifications(p.certifications);
+      if (p.targetMarkets?.length) setMarkets(p.targetMarkets);
+    } catch { /* ignore */ }
+  }, []);
+
   const toggleCert = (cert: string) => {
     setCertifications((prev) =>
       prev.includes(cert) ? prev.filter((c) => c !== cert) : [...prev, cert]
@@ -76,8 +91,8 @@ export default function TrustAssetsPage() {
   return (
     <div className="flex flex-col h-screen">
       <div className="px-6 py-4 border-b border-border bg-white">
-        <h1 className="text-lg font-semibold">买家信任资产构建</h1>
-        <p className="text-sm text-muted">这是买家谷歌你之后看到的内容，直接决定是否信任你</p>
+        <h1 className="text-base font-semibold">让买家更信你 · 信任资料包</h1>
+        <p className="text-sm text-muted">买家 Google 你之后第一眼看到什么？这里生成你的英文介绍 + 诊断你缺了哪些信任背书</p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">
@@ -152,7 +167,7 @@ export default function TrustAssetsPage() {
               disabled={loading || !companyName.trim() || !products.trim()}
               className="w-full py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
             >
-              {loading ? "AI正在生成信任资产..." : "生成信任资产包 →"}
+              {loading ? "AI 正在生成信任资料包…" : "生成我的信任资料包 + 缺口诊断 →"}
             </button>
           </div>
 

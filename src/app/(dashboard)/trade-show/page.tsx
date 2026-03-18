@@ -53,8 +53,8 @@ export default function TradeShowPage() {
   return (
     <div className="flex flex-col h-screen">
       <div className="px-6 py-4 border-b border-border bg-white">
-        <h1 className="text-lg font-semibold">展会前情报包</h1>
-        <p className="text-sm text-muted">AI帮你提前了解展会买家画像、准备30秒介绍和常见问题应对</p>
+        <h1 className="text-base font-semibold">展会临门一脚 · 去之前该准备什么</h1>
+        <p className="text-sm text-muted">这个展会该见谁、怎么开口、遇到哪些问题如何回答、会后怎么跟进</p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">

@@ -55,8 +55,8 @@ export default function RadarPage() {
   return (
     <div className="flex flex-col h-screen">
       <div className="px-6 py-4 border-b border-border bg-white">
-        <h1 className="text-lg font-semibold">选品雷达</h1>
-        <p className="text-sm text-muted">告诉AI你能做什么，它帮你找最值得出海的品类</p>
+        <h1 className="text-base font-semibold">选品验证雷达 · 哪个品类更好出海</h1>
+        <p className="text-sm text-muted">输入你的工厂能力，AI分析哪些品类市场热度高、竞争可进入、你有优势</p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">

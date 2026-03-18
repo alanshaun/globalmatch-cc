@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { TARGET_MARKETS } from "@/lib/constants";
+import type { SellerProfile } from "@/app/(dashboard)/setup/page";
+import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
 
 interface PricingResult {
   marketMin: number;
@@ -25,6 +27,18 @@ export default function PricingPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PricingResult | null>(null);
 
+  // Pre-fill from global seller profile
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SELLER_PROFILE_KEY);
+      if (!raw) return;
+      const p: SellerProfile = JSON.parse(raw);
+      if (p.productName) setProductName(p.productName);
+      if (p.priceRange) setMyPrice(p.priceRange);
+      if (p.targetMarkets?.[0]) setMarket(p.targetMarkets[0]);
+    } catch { /* ignore */ }
+  }, []);
+
   const handleAnalyze = async () => {
     if (!productName.trim()) return;
     setLoading(true);
@@ -45,8 +59,8 @@ export default function PricingPage() {
   return (
     <div className="flex flex-col h-screen">
       <div className="px-6 py-4 border-b border-border bg-white">
-        <h1 className="text-lg font-semibold">竞品价格情报</h1>
-        <p className="text-sm text-muted">了解市场价格区间，制定最优报价策略</p>
+        <h1 className="text-base font-semibold">我该怎么报价 · 价格策略分析</h1>
+        <p className="text-sm text-muted">看市场价格带分布，判断你报高了还是低了，给出建议报价策略</p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">
@@ -93,7 +107,7 @@ export default function PricingPage() {
               disabled={loading || !productName.trim()}
               className="w-full py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
             >
-              {loading ? "正在分析市场价格..." : "分析价格情报 →"}
+              {loading ? "正在分析市场价格…" : "分析报价策略 →"}
             </button>
           </div>
 

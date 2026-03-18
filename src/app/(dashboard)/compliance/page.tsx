@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import type { SellerProfile } from "@/app/(dashboard)/setup/page";
+import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
 
 const PRODUCT_CATEGORIES = ["电子", "食品", "玩具", "化工", "纺织", "机械", "医疗器械", "其他"];
 const TARGET_COUNTRIES = ["美国", "欧盟", "英国", "日本", "澳大利亚", "加拿大", "印度", "中东"];
@@ -37,6 +39,17 @@ export default function CompliancePage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ComplianceResult | null>(null);
 
+  // Pre-fill from global seller profile
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SELLER_PROFILE_KEY);
+      if (!raw) return;
+      const p: SellerProfile = JSON.parse(raw);
+      if (p.certifications?.length) setExisting(p.certifications);
+      if (p.targetMarkets?.length) setCountries(p.targetMarkets.slice(0, 3));
+    } catch { /* ignore */ }
+  }, []);
+
   const toggleCountry = (c: string) =>
     setCountries((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
   const toggleCert = (c: string) =>
@@ -62,8 +75,8 @@ export default function CompliancePage() {
   return (
     <div className="flex flex-col h-screen">
       <div className="px-6 py-4 border-b border-border bg-white">
-        <h1 className="text-lg font-semibold">合规认证路径</h1>
-        <p className="text-sm text-muted">清晰了解进入目标市场需要哪些认证，按最易先做排序</p>
+        <h1 className="text-base font-semibold">出口认证路径 · 哪些证必须做</h1>
+        <p className="text-sm text-muted">选产品品类 + 目标国家，系统列出必做认证清单、周期、费用和最容易卡住的点</p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">

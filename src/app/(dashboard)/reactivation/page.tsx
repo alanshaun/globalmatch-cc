@@ -65,8 +65,8 @@ export default function ReactivationPage() {
   return (
     <div className="flex flex-col h-screen">
       <div className="px-6 py-4 border-b border-border bg-white">
-        <h1 className="text-lg font-semibold">沉默买家唤醒</h1>
-        <p className="text-sm text-muted">AI为每个沉默买家生成个性化的跟进策略</p>
+        <h1 className="text-base font-semibold">跟进与唤醒 · 7天没回的客户怎么追</h1>
+        <p className="text-sm text-muted">自动识别未回复买家，分层生成个性化跟进策略，一键复制发送</p>
       </div>
 
       <div className="flex-1 overflow-auto p-6">

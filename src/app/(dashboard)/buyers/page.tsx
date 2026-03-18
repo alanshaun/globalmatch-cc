@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import Link from "next/link";
 import { SearchModal } from "@/components/buyer/SearchModal";
 import { BuyerCard } from "@/components/buyer/BuyerCard";
 import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
 import { ErrorBoundary, DrawerErrorBoundary } from "@/components/ErrorBoundary";
 import { normalizeBuyer, normalizeBuyerArray } from "@/lib/normalizeBuyer";
+import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
+import type { SellerProfile } from "@/app/(dashboard)/setup/page";
 import type { SupplierWeaknessResult } from "@/services/supplierWeakness";
 
 export interface BuyerResult {
@@ -77,6 +80,15 @@ export default function BuyersPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [savedProfile, setSavedProfile] = useState<SellerProfile | null>(null);
+
+  // Load saved global profile
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SELLER_PROFILE_KEY);
+      if (raw) setSavedProfile(JSON.parse(raw));
+    } catch { /* ignore */ }
+  }, []);
 
   // Load past sessions on mount
   useEffect(() => {
@@ -198,8 +210,8 @@ export default function BuyersPage() {
       {/* Header */}
       <div className="px-6 py-4 border-b border-border bg-white flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-foreground">找买家</h1>
-          <p className="text-sm text-muted">AI智能匹配全球真实买家，质量优先</p>
+          <h1 className="text-base font-semibold text-foreground">生成高意向买家名单</h1>
+          <p className="text-sm text-muted">90秒内找到匹配买家 · 含联系人、匹配理由、可发送开发信</p>
         </div>
         <div className="flex items-center gap-2">
           {/* History button */}
@@ -305,6 +317,24 @@ export default function BuyersPage() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-6" onClick={() => showHistory && setShowHistory(false)}>
+
+        {/* Profile banner — shows if global profile is saved */}
+        {savedProfile && buyers.length === 0 && status === "idle" && (
+          <div className="mb-4 flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
+            <span className="text-xl">✅</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                已读取你的资料：<span className="text-primary">{savedProfile.productName}</span>
+                {savedProfile.targetMarkets?.length ? (
+                  <span className="text-muted font-normal"> · 目标市场：{savedProfile.targetMarkets.join("、")}</span>
+                ) : null}
+              </p>
+              <p className="text-xs text-muted">点"新建匹配"时信息会自动填入</p>
+            </div>
+            <Link href="/setup" className="text-xs text-primary hover:underline whitespace-nowrap">修改资料</Link>
+          </div>
+        )}
+
         {status === "idle" && buyers.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="text-5xl mb-4">🎯</div>
