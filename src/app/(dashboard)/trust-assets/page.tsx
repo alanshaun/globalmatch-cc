@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { SellerProfile } from "@/lib/constants";
 import { SELLER_PROFILE_KEY } from "@/lib/constants";
+import { apiPost } from "@/lib/apiClient";
 
 interface TrustAssets {
   aboutUs: string;
@@ -51,6 +52,7 @@ export default function TrustAssetsPage() {
   const [markets, setMarkets] = useState<string[]>(["美国", "欧洲"]);
   const [loading, setLoading] = useState(false);
   const [assets, setAssets] = useState<TrustAssets | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
 
   // Pre-fill from global seller profile
   useEffect(() => {
@@ -75,16 +77,17 @@ export default function TrustAssetsPage() {
     if (!companyName.trim() || !products.trim()) return;
     setLoading(true);
     setAssets(null);
-    try {
-      const res = await fetch("/api/trust-assets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ companyName, companyNameEn, products, certifications, yearsEstablished, markets }),
-      });
-      const data = await res.json();
+    setErrorMsg("");
+    const { data, ok, error } = await apiPost<TrustAssets>(
+      "/api/trust-assets",
+      { companyName, companyNameEn, products, certifications, yearsEstablished, markets },
+      { timeoutMs: 30_000, retries: 2 }
+    );
+    setLoading(false);
+    if (ok && data) {
       setAssets(data);
-    } finally {
-      setLoading(false);
+    } else {
+      setErrorMsg(error || "生成失败，请重试");
     }
   };
 
@@ -184,6 +187,13 @@ export default function TrustAssetsPage() {
             <div className="flex items-center justify-center py-12">
               <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mr-3" />
               <span className="text-muted text-sm">AI正在生成专业内容...</span>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="bg-danger/5 border border-danger/20 rounded-xl p-4 mb-4">
+              <p className="text-sm text-danger">⚠ {errorMsg}</p>
+              <button onClick={handleGenerate} className="text-xs text-danger font-medium mt-2 underline">重试</button>
             </div>
           )}
 

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { TARGET_MARKETS } from "@/lib/constants";
 import type { SellerProfile } from "@/lib/constants";
 import { SELLER_PROFILE_KEY } from "@/lib/constants";
+import { apiPost } from "@/lib/apiClient";
 
 interface PricingResult {
   marketMin: number;
@@ -41,6 +42,7 @@ export default function PricingPage() {
   const [market, setMarket] = useState("美国");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<PricingResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
 
   useEffect(() => {
     try {
@@ -57,16 +59,17 @@ export default function PricingPage() {
     if (!productName.trim()) return;
     setLoading(true);
     setResult(null);
-    try {
-      const res = await fetch("/api/pricing", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productName, myPrice, market }),
-      });
-      const data = await res.json();
+    setErrorMsg("");
+    const { data, ok, error } = await apiPost<PricingResult>(
+      "/api/pricing",
+      { productName, myPrice, market },
+      { timeoutMs: 30_000, retries: 2 }
+    );
+    setLoading(false);
+    if (ok && data) {
       setResult(data);
-    } finally {
-      setLoading(false);
+    } else {
+      setErrorMsg(error || "分析失败，请重试");
     }
   };
 
@@ -142,6 +145,13 @@ export default function PricingPage() {
             <div className="flex items-center justify-center py-12">
               <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mr-3" />
               <span className="text-muted text-sm">正在收集市场价格数据...</span>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="bg-danger/5 border border-danger/20 rounded-xl p-4 mb-4">
+              <p className="text-sm text-danger">⚠ {errorMsg}</p>
+              <button onClick={handleAnalyze} className="text-xs text-danger font-medium mt-2 underline">重试</button>
             </div>
           )}
 

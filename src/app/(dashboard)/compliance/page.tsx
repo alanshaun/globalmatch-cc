@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import type { SellerProfile } from "@/lib/constants";
 import { SELLER_PROFILE_KEY } from "@/lib/constants";
+import { apiPost } from "@/lib/apiClient";
 
 const PRODUCT_CATEGORIES = ["电子", "食品", "玩具", "化工", "纺织", "机械", "医疗器械", "其他"];
 const TARGET_COUNTRIES = ["美国", "欧盟", "英国", "日本", "澳大利亚", "加拿大", "印度", "中东"];
@@ -38,6 +39,7 @@ export default function CompliancePage() {
   const [existing, setExisting] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ComplianceResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
 
   // Pre-fill from global seller profile
   useEffect(() => {
@@ -59,16 +61,17 @@ export default function CompliancePage() {
     if (!category || countries.length === 0) return;
     setLoading(true);
     setResult(null);
-    try {
-      const res = await fetch("/api/compliance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ productCategory: category, targetCountries: countries, existingCertifications: existing }),
-      });
-      const data = await res.json();
+    setErrorMsg("");
+    const { data, ok, error } = await apiPost<ComplianceResult>(
+      "/api/compliance",
+      { productCategory: category, targetCountries: countries, existingCertifications: existing },
+      { timeoutMs: 30_000, retries: 2 }
+    );
+    setLoading(false);
+    if (ok && data) {
       setResult(data);
-    } finally {
-      setLoading(false);
+    } else {
+      setErrorMsg(error || "分析失败，请重试");
     }
   };
 
@@ -146,6 +149,13 @@ export default function CompliancePage() {
             <div className="flex items-center justify-center py-12">
               <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mr-3" />
               <span className="text-muted text-sm">正在分析合规要求...</span>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="bg-danger/5 border border-danger/20 rounded-xl p-4 mb-4">
+              <p className="text-sm text-danger">⚠ {errorMsg}</p>
+              <button onClick={handleAnalyze} className="text-xs text-danger font-medium mt-2 underline">重试</button>
             </div>
           )}
 

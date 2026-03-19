@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { apiPost } from "@/lib/apiClient";
 
 interface TradeShowResult {
   showOverview: {
@@ -29,6 +30,7 @@ export default function TradeShowPage() {
   const [buyerTypes, setBuyerTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<TradeShowResult | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
 
   const toggleBuyerType = (type: string) =>
     setBuyerTypes((prev) => prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]);
@@ -37,16 +39,17 @@ export default function TradeShowPage() {
     if (!showName.trim() || !productCategory.trim()) return;
     setLoading(true);
     setResult(null);
-    try {
-      const res = await fetch("/api/trade-show", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ showName, productCategory, buyerTypes }),
-      });
-      const data = await res.json();
+    setErrorMsg("");
+    const { data, ok, error } = await apiPost<TradeShowResult>(
+      "/api/trade-show",
+      { showName, productCategory, buyerTypes },
+      { timeoutMs: 30_000, retries: 2 }
+    );
+    setLoading(false);
+    if (ok && data) {
       setResult(data);
-    } finally {
-      setLoading(false);
+    } else {
+      setErrorMsg(error || "生成失败，请重试");
     }
   };
 
@@ -112,6 +115,13 @@ export default function TradeShowPage() {
             <div className="flex items-center justify-center py-12">
               <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mr-3" />
               <span className="text-muted text-sm">AI正在分析展会数据...</span>
+            </div>
+          )}
+
+          {errorMsg && (
+            <div className="bg-danger/5 border border-danger/20 rounded-xl p-4 mb-4">
+              <p className="text-sm text-danger">⚠ {errorMsg}</p>
+              <button onClick={handleGenerate} className="text-xs text-danger font-medium mt-2 underline">重试</button>
             </div>
           )}
 

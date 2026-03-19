@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { apiFetch, apiPost } from "@/lib/apiClient";
 
 interface SilentBuyer {
   id: string;
@@ -29,36 +30,39 @@ export default function ReactivationPage() {
   const [selected, setSelected] = useState<SilentBuyer | null>(null);
   const [strategy, setStrategy] = useState<ReactivationStrategy | null>(null);
   const [strategyLoading, setStrategyLoading] = useState(false);
+  const [strategyError, setStrategyError] = useState("");
 
   useEffect(() => {
-    fetch("/api/reactivation?userId=demo-user&silentDays=7")
-      .then((r) => r.json())
-      .then((data) => setBuyers(data.buyers || []))
-      .catch(() => setBuyers([]))
-      .finally(() => setLoading(false));
-  }, []);
+    apiFetch<{ buyers: SilentBuyer[] }>(
+      "/api/reactivation?userId=demo-user&silentDays=7",
+      { timeoutMs: 15_000, retries: 2 }
+    ).then(({ data }) => {
+      setBuyers(data?.buyers || []);
+    }).finally(() => setLoading(false));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleGetStrategy = async (buyer: SilentBuyer) => {
     setSelected(buyer);
     setStrategy(null);
+    setStrategyError("");
     setStrategyLoading(true);
-    try {
-      const res = await fetch("/api/reactivation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          emailId: buyer.id,
-          companyName: buyer.companyName,
-          isOpened: buyer.isOpened,
-          silentDays: buyer.silentDays,
-          originalSubject: buyer.subject,
-          originalBody: buyer.body,
-        }),
-      });
-      const data = await res.json();
+    const { data, ok, error } = await apiPost<ReactivationStrategy>(
+      "/api/reactivation",
+      {
+        emailId: buyer.id,
+        companyName: buyer.companyName,
+        isOpened: buyer.isOpened,
+        silentDays: buyer.silentDays,
+        originalSubject: buyer.subject,
+        originalBody: buyer.body,
+      },
+      { timeoutMs: 30_000, retries: 2 }
+    );
+    setStrategyLoading(false);
+    if (ok && data) {
       setStrategy(data);
-    } finally {
-      setStrategyLoading(false);
+    } else {
+      setStrategyError(error || "生成策略失败，请重试");
     }
   };
 
@@ -128,6 +132,18 @@ export default function ReactivationPage() {
                   <div className="flex items-center gap-3 py-6">
                     <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                     <span className="text-muted text-sm">AI正在制定唤醒策略...</span>
+                  </div>
+                )}
+
+                {strategyError && (
+                  <div className="bg-danger/5 border border-danger/20 rounded-lg p-3 mt-2">
+                    <p className="text-sm text-danger">⚠ {strategyError}</p>
+                    <button
+                      onClick={() => handleGetStrategy(selected)}
+                      className="text-xs text-danger font-medium mt-2 underline"
+                    >
+                      重试
+                    </button>
                   </div>
                 )}
 
