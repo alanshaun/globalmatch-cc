@@ -1,3 +1,19 @@
+export const SELLER_PROFILE_KEY = "gm_seller_profile";
+
+export interface SellerProfile {
+  companyName: string;
+  productName: string;
+  productDescription: string;
+  hsCode: string;
+  certifications: string[];
+  targetMarkets: string[];
+  priceRange: string;
+  moq: string;
+  companyWebsite: string;
+  strengths: string;
+  savedAt: string;
+}
+
 export const COUNTRY_CODES: Record<string, string> = {
   美国: "US",
   欧洲: "DE",

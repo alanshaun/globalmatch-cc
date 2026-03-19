@@ -8,8 +8,8 @@ import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
 import { ErrorBoundary, DrawerErrorBoundary } from "@/components/ErrorBoundary";
 import { normalizeBuyer, normalizeBuyerArray } from "@/lib/normalizeBuyer";
 import { IntentPopupContainer, useIntentEvents } from "@/components/buyer/IntentPopup";
-import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
-import type { SellerProfile } from "@/app/(dashboard)/setup/page";
+import { SELLER_PROFILE_KEY } from "@/lib/constants";
+import type { SellerProfile } from "@/lib/constants";
 import type { SupplierWeaknessResult } from "@/services/supplierWeakness";
 import type { CompetitorData, SocialDynamics } from "@/services/intelligenceAgent";
 

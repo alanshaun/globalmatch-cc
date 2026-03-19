@@ -10,23 +10,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { TARGET_MARKETS } from "@/lib/constants";
-
-export const SELLER_PROFILE_KEY = "gm_seller_profile";
-
-export interface SellerProfile {
-  companyName: string;
-  productName: string;
-  productDescription: string;
-  hsCode: string;
-  certifications: string[];
-  targetMarkets: string[];
-  priceRange: string;
-  moq: string;
-  companyWebsite: string;
-  strengths: string;
-  savedAt: string;
-}
+import { TARGET_MARKETS, SELLER_PROFILE_KEY, SellerProfile } from "@/lib/constants";
 
 type Step = "input" | "review";
 type InputMode = "url" | "file" | "manual";

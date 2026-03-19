@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import type { SellerProfile } from "@/app/(dashboard)/setup/page";
-import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
+import type { SellerProfile } from "@/lib/constants";
+import { SELLER_PROFILE_KEY } from "@/lib/constants";
 
 const PRODUCT_CATEGORIES = ["电子", "食品", "玩具", "化工", "纺织", "机械", "医疗器械", "其他"];
 const TARGET_COUNTRIES = ["美国", "欧盟", "英国", "日本", "澳大利亚", "加拿大", "印度", "中东"];

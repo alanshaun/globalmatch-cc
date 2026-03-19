@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { TARGET_MARKETS } from "@/lib/constants";
-import type { SellerProfile } from "@/app/(dashboard)/setup/page";
-import { SELLER_PROFILE_KEY } from "@/app/(dashboard)/setup/page";
+import type { SellerProfile } from "@/lib/constants";
+import { SELLER_PROFILE_KEY } from "@/lib/constants";
 
 interface PricingResult {
   marketMin: number;
