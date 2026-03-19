@@ -128,12 +128,19 @@ export default function RadarPage() {
           userId: "demo-user",
         }),
       });
-      if (!res.ok) { setLoading(false); return; }
-      const { jobId } = await res.json();
+      if (!res.ok) {
+        setStatusMsg("启动失败，正在重试...");
+        setTimeout(() => handleAnalyze(), 1000);
+        return;
+      }
+      const data = await res.json();
+      const jobId = data?.jobId;
+      if (!jobId) { setStatusMsg("启动失败，请重试"); return; }
       trackJob(jobId);
       startPolling(jobId);
-    } catch {
-      setLoading(false);
+    } catch (err) {
+      console.error("[radar] handleAnalyze error:", err);
+      setStatusMsg("网络错误，请检查连接后重试");
     }
   };
 

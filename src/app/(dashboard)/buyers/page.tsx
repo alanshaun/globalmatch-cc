@@ -306,24 +306,26 @@ export default function BuyersPage() {
       });
 
       if (!res.ok) {
-        setStatus("completed");
-        setStatusMsg("搜索启动失败，请重试");
+        // Don't hide — retry once after 1s
+        setStatusMsg("启动失败，正在重试...");
+        setTimeout(() => handleSearchStart(params), 1000);
         return;
       }
 
-      const { jobId } = await res.json();
+      const data = await res.json();
+      const jobId = data?.jobId;
       if (!jobId) {
-        setStatus("completed");
-        setStatusMsg("搜索启动失败，请重试");
+        setStatusMsg("启动失败，请稍后重试");
         return;
       }
 
       setCurrentJobId(jobId);
       trackJob(jobId);
       startPolling(jobId);
-    } catch {
-      setStatus("completed");
-      setStatusMsg("搜索遇到问题，请重试");
+    } catch (err) {
+      console.error("[buyers] handleSearchStart error:", err);
+      setStatusMsg("网络错误，请检查连接后重试");
+      // Keep status="running" so progress bar stays visible
     }
   };
 

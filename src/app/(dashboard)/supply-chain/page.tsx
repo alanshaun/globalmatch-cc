@@ -269,12 +269,21 @@ export default function SupplyChainPage() {
           userId: "demo-user",
         }),
       });
-      if (!res.ok) { setLoading(false); return; }
-      const { jobId } = await res.json();
+      if (!res.ok) {
+        setStatusMsg("启动失败，正在重试...");
+        // Retry once after 1s
+        setTimeout(() => handleSearch(), 1000);
+        return;
+      }
+      const data = await res.json();
+      const jobId = data?.jobId;
+      if (!jobId) { setStatusMsg("启动失败，请重试"); return; }
       trackJob(jobId);
       startPolling(jobId);
-    } catch {
-      setLoading(false);
+    } catch (err) {
+      console.error("[supply-chain] handleSearch error:", err);
+      setStatusMsg("网络错误，请检查连接后重试");
+      // Don't hide loading — show error in progress area
     }
   };
 
