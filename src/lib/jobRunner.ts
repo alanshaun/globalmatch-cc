@@ -1,9 +1,10 @@
 /**
  * Background Job Runner
  * Executes search jobs server-side, independent of client connection.
- * Results are persisted to DB so clients can reconnect anytime.
+ * Uses in-memory jobStore — works with or without DB.
  */
 
+import { updateJob } from "./jobStore";
 import { prisma } from "./db";
 import { llmParseJSON } from "./llmClient";
 import { searchViaSerpAPI } from "@/scrapers/serpapi";
@@ -12,25 +13,8 @@ import { COUNTRY_SEARCH_TERMS } from "./constants";
 import { analyzeProduct } from "@/services/productAnalyzer";
 import { runBuyerSearch } from "@/services/searchOrchestrator";
 
-// Module-level map keeps promises alive even after HTTP response is sent
+// Keep promise references alive so GC doesn't kill them
 const activeJobs = new Map<string, Promise<void>>();
-
-async function updateJob(
-  jobId: string,
-  updates: {
-    status?: string;
-    progress?: number;
-    message?: string;
-    output?: unknown;
-    error?: string;
-    sessionId?: string;
-    completedAt?: Date;
-  }
-) {
-  await prisma.searchJob
-    .update({ where: { id: jobId }, data: updates as Record<string, unknown> })
-    .catch((err) => console.error("[JobRunner] updateJob failed:", err));
-}
 
 async function runBuyerJob(
   jobId: string,
@@ -43,7 +27,7 @@ async function runBuyerJob(
   }
 ) {
   try {
-    await updateJob(jobId, { status: "running", progress: 5, message: "正在解析产品信息..." });
+    updateJob(jobId, { status: "running", progress: 5, message: "正在解析产品信息..." });
 
     const rawInput = [input.productName, input.productDescription].filter(Boolean).join("\n");
     const profile = await analyzeProduct(rawInput);
@@ -86,7 +70,7 @@ async function runBuyerJob(
       })
       .catch(() => ({ id: `session-${Date.now()}` }));
 
-    await updateJob(jobId, {
+    updateJob(jobId, {
       sessionId: session.id,
       progress: 10,
       message: "产品分析完成，开始全网搜索买家...",
@@ -120,20 +104,20 @@ async function runBuyerJob(
       console.error("[JobRunner:buyer] runBuyerSearch error:", err);
     });
 
-    await updateJob(jobId, {
+    updateJob(jobId, {
       status: "completed",
       progress: 100,
       message: `搜索完成，找到 ${foundCount} 家匹配买家`,
       output: { foundCount, sessionId: session.id },
-      completedAt: new Date(),
+      completedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error("[JobRunner:buyer]", err);
-    await updateJob(jobId, {
+    updateJob(jobId, {
       status: "failed",
       error: String(err),
       message: "搜索遇到问题，请重试",
-      completedAt: new Date(),
+      completedAt: new Date().toISOString(),
     });
   }
 }
@@ -151,7 +135,7 @@ async function runRadarJob(
   }
 ) {
   try {
-    await updateJob(jobId, { status: "running", progress: 10, message: "AI正在分析全球市场机会..." });
+    updateJob(jobId, { status: "running", progress: 10, message: "AI正在分析全球市场机会..." });
 
     const result = await llmParseJSON<{ recommendations: unknown[] }>(
       `You are a B2B export consultant. Analyze this factory and recommend export product categories.
@@ -188,20 +172,20 @@ Return ONLY this JSON (no markdown):
       { recommendations: [] }
     );
 
-    await updateJob(jobId, {
+    updateJob(jobId, {
       status: "completed",
       progress: 100,
       message: `分析完成，找到 ${result.recommendations?.length || 0} 个品类机会`,
       output: result,
-      completedAt: new Date(),
+      completedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error("[JobRunner:radar]", err);
-    await updateJob(jobId, {
+    updateJob(jobId, {
       status: "failed",
       error: String(err),
       message: "分析遇到问题，请重试",
-      completedAt: new Date(),
+      completedAt: new Date().toISOString(),
     });
   }
 }
@@ -218,7 +202,7 @@ async function runSupplyChainJob(
   }
 ) {
   try {
-    await updateJob(jobId, { status: "running", progress: 10, message: "正在生成搜索关键词..." });
+    updateJob(jobId, { status: "running", progress: 10, message: "正在生成搜索关键词..." });
 
     const count = input.count || 10;
 
@@ -230,7 +214,7 @@ async function runSupplyChainJob(
       { keywords: [input.need, `${input.need} manufacturer`, `${input.need} factory`, `${input.need} supplier`] }
     );
 
-    await updateJob(jobId, { progress: 25, message: "正在全网搜索供应商..." });
+    updateJob(jobId, { progress: 25, message: "正在全网搜索供应商..." });
 
     const queries = keywordsResult.keywords.slice(0, 5);
     const regionTerm = COUNTRY_SEARCH_TERMS[input.region] || "China";
@@ -242,30 +226,17 @@ async function runSupplyChainJob(
     ]);
 
     const allDomains: string[] = [];
-    if (serpResults.status === "fulfilled") {
-      allDomains.push(...serpResults.value.map((r) => r.domain));
-    }
-    if (ddgResults.status === "fulfilled") {
-      allDomains.push(...ddgResults.value.map((r) => r.domain));
-    }
+    if (serpResults.status === "fulfilled") allDomains.push(...serpResults.value.map((r) => r.domain));
+    if (ddgResults.status === "fulfilled") allDomains.push(...ddgResults.value.map((r) => r.domain));
 
     const uniqueDomains = Array.from(new Set(allDomains)).slice(0, count * 2);
-    await updateJob(jobId, { progress: 40, message: `找到 ${uniqueDomains.length} 个候选域名，开始AI评估...` });
+    updateJob(jobId, { progress: 40, message: `找到 ${uniqueDomains.length} 个候选，开始AI评估...` });
 
     interface SupplierResult {
-      companyName: string;
-      website: string;
-      domain: string;
-      country: string;
-      capability: string;
-      complianceScore: number;
-      capabilityScore: number;
-      commercialScore: number;
-      overallScore: number;
-      summary: string;
-      certifications: string[];
-      minOrderQty: string;
-      leadTime: string;
+      companyName: string; website: string; domain: string; country: string;
+      capability: string; complianceScore: number; capabilityScore: number;
+      commercialScore: number; overallScore: number; summary: string;
+      certifications: string[]; minOrderQty: string; leadTime: string;
     }
 
     const suppliers: SupplierResult[] = [];
@@ -273,77 +244,51 @@ async function runSupplyChainJob(
 
     for (let i = 0; i < Math.min(uniqueDomains.length, count * 2); i += batchSize) {
       const batch = uniqueDomains.slice(i, i + batchSize);
-      const batchProgress = 40 + Math.round(((i + batchSize) / (count * 2)) * 50);
-
       await Promise.allSettled(
         batch.map(async (domain) => {
           const analysis = await llmParseJSON<SupplierResult>(
             `Analyze this potential supplier for: "${input.need}"
             Domain: ${domain}
             Requirements: quantity=${input.quantity}, budget=${input.budget}, certifications=${(input.certifications || []).join(",")}
-
-            Return JSON:
-            {
-              "companyName": "company name or domain",
-              "website": "https://${domain}",
-              "domain": "${domain}",
-              "country": "estimated country",
-              "capability": "what they can manufacture",
-              "complianceScore": 0-100,
-              "capabilityScore": 0-100,
-              "commercialScore": 0-100,
-              "overallScore": 0-100,
-              "summary": "2-sentence assessment",
-              "certifications": ["likely certifications"],
-              "minOrderQty": "estimated MOQ",
-              "leadTime": "estimated lead time"
+            Return JSON: {
+              "companyName":"company name or domain","website":"https://${domain}","domain":"${domain}",
+              "country":"estimated country","capability":"what they manufacture",
+              "complianceScore":50,"capabilityScore":50,"commercialScore":50,"overallScore":50,
+              "summary":"2-sentence assessment","certifications":[],"minOrderQty":"TBD","leadTime":"TBD"
             }`,
-            "You assess B2B suppliers for export businesses.",
-            {
-              companyName: domain,
-              website: `https://${domain}`,
-              domain,
-              country: "Unknown",
-              capability: input.need,
-              complianceScore: 50,
-              capabilityScore: 50,
-              commercialScore: 50,
-              overallScore: 50,
-              summary: "Supplier analysis pending",
-              certifications: [],
-              minOrderQty: "TBD",
-              leadTime: "TBD",
-            }
+            "You assess B2B suppliers.",
+            { companyName: domain, website: `https://${domain}`, domain, country: "Unknown",
+              capability: input.need, complianceScore: 50, capabilityScore: 50,
+              commercialScore: 50, overallScore: 50, summary: "Pending", certifications: [],
+              minOrderQty: "TBD", leadTime: "TBD" }
           );
           suppliers.push(analysis);
         })
       );
-
-      await updateJob(jobId, {
-        progress: Math.min(90, batchProgress),
+      updateJob(jobId, {
+        progress: Math.min(90, 40 + Math.round(((i + batchSize) / (count * 2)) * 50)),
         message: `已分析 ${suppliers.length} 家供应商...`,
       });
-
       if (suppliers.length >= count) break;
     }
 
     suppliers.sort((a, b) => b.overallScore - a.overallScore);
-    const finalSuppliers = suppliers.slice(0, count);
+    const final = suppliers.slice(0, count);
 
-    await updateJob(jobId, {
+    updateJob(jobId, {
       status: "completed",
       progress: 100,
-      message: `搜索完成，找到 ${finalSuppliers.length} 家供应商`,
-      output: { suppliers: finalSuppliers },
-      completedAt: new Date(),
+      message: `搜索完成，找到 ${final.length} 家供应商`,
+      output: { suppliers: final },
+      completedAt: new Date().toISOString(),
     });
   } catch (err) {
     console.error("[JobRunner:supply-chain]", err);
-    await updateJob(jobId, {
+    updateJob(jobId, {
       status: "failed",
       error: String(err),
       message: "搜索遇到问题，请重试",
-      completedAt: new Date(),
+      completedAt: new Date().toISOString(),
     });
   }
 }

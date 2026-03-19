@@ -1,11 +1,11 @@
 /**
- * /api/jobs - Create and list search jobs
- * POST: Create a new background job (returns jobId immediately)
- * GET: List all jobs for a user
+ * /api/jobs — Create and list search jobs
+ * Uses in-memory store (always works, no DB required).
+ * DB is synced best-effort for persistence.
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db";
+import { createJob, listJobs } from "@/lib/jobStore";
 import { startJob } from "@/lib/jobRunner";
 
 export const dynamic = "force-dynamic";
@@ -19,12 +19,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing type or input" }, { status: 400 });
     }
 
-    // Create job record
-    const job = await prisma.searchJob.create({
-      data: { type, input, userId, status: "pending", progress: 0, message: "任务已创建，准备开始..." },
-    });
+    // Create job in memory FIRST — always succeeds
+    const job = createJob(type, input, userId);
 
-    // Fire and forget - runs in background even after response is sent
+    // Start background processing — fire and forget
     startJob(job.id, type, input);
 
     return NextResponse.json({ jobId: job.id, status: "pending" });
@@ -35,30 +33,9 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const userId = searchParams.get("userId") || "demo-user";
+  const { searchParams } = new URL(req.url);
+  const userId = searchParams.get("userId") || "demo-user";
 
-    const jobs = await prisma.searchJob.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-      take: 30,
-      select: {
-        id: true,
-        type: true,
-        status: true,
-        progress: true,
-        message: true,
-        sessionId: true,
-        createdAt: true,
-        completedAt: true,
-        error: true,
-      },
-    });
-
-    return NextResponse.json({ jobs });
-  } catch (err) {
-    console.error("[GET /api/jobs]", err);
-    return NextResponse.json({ jobs: [] });
-  }
+  const jobs = listJobs(userId);
+  return NextResponse.json({ jobs });
 }
