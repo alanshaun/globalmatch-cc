@@ -195,5 +195,7 @@ export async function llmParseJSON<T>(
 ): Promise<T & { generatedBy?: string }> {
   const response = await llmCall(prompt, systemPrompt, options);
   const parsed = parseJSON<T>(response.content, fallback);
-  return { ...parsed, generatedBy: response.provider };
+  // Merge with fallback so missing fields are always filled in
+  const merged = { ...(fallback as object), ...(parsed as object) } as T;
+  return { ...merged, generatedBy: response.provider };
 }

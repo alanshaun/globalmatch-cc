@@ -216,12 +216,15 @@ async function runSupplyChainJob(
 
     updateJob(jobId, { progress: 25, message: "正在全网搜索供应商..." });
 
-    const queries = keywordsResult.keywords.slice(0, 5);
+    const queries = (keywordsResult?.keywords ?? []).filter(Boolean).slice(0, 5);
+    const safeQueries = queries.length > 0
+      ? queries
+      : [input.need, `${input.need} manufacturer`, `${input.need} supplier`, `${input.need} factory`];
     const regionTerm = COUNTRY_SEARCH_TERMS[input.region] || "China";
-    const fullQueries = queries.map((q) => `${q} ${regionTerm} manufacturer`);
+    const fullQueries = safeQueries.map((q) => `${q} ${regionTerm} manufacturer`);
 
     const [serpResults, ddgResults] = await Promise.allSettled([
-      searchViaSerpAPI(input.need, queries, [input.region], COUNTRY_SEARCH_TERMS),
+      searchViaSerpAPI(input.need, safeQueries, [input.region], COUNTRY_SEARCH_TERMS),
       searchViaDDG(fullQueries.slice(0, 3)),
     ]);
 
