@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useTask } from "@/contexts/TaskContext";
 
 interface Supplier {
   companyName: string;
@@ -190,21 +191,89 @@ export default function SupplyChainPage() {
   const [count, setCount] = useState(10);
   const [showCerts, setShowCerts] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [statusMsg, setStatusMsg] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+  const { trackJob } = useTask();
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  // On mount: resume any running supply-chain job
+  useEffect(() => {
+    const resume = async () => {
+      try {
+        const res = await fetch("/api/jobs?userId=demo-user");
+        if (!res.ok) return;
+        const { jobs } = await res.json();
+        const activeJob = jobs.find(
+          (j: { type: string; status: string }) =>
+            j.type === "supply-chain" && (j.status === "pending" || j.status === "running")
+        );
+        if (activeJob) {
+          setLoading(true);
+          setProgress(activeJob.progress || 0);
+          setStatusMsg(activeJob.message || "搜索进行中...");
+          startPolling(activeJob.id);
+        }
+      } catch { /* ignore */ }
+    };
+    resume();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startPolling = (jobId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) return;
+        const { job } = await res.json();
+        setProgress(job.progress || 0);
+        setStatusMsg(job.message || "搜索中...");
+
+        if (job.status === "completed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setLoading(false);
+          const output = job.output as { suppliers?: Supplier[] };
+          setSuppliers(output?.suppliers || []);
+        } else if (job.status === "failed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setLoading(false);
+          setStatusMsg("搜索遇到问题，请重试");
+        }
+      } catch { /* ignore */ }
+    };
+
+    poll();
+    pollRef.current = setInterval(poll, 3000);
+  };
 
   const handleSearch = async () => {
     if (!need.trim()) return;
     setLoading(true);
     setSuppliers([]);
+    setProgress(0);
+    setStatusMsg("正在启动搜索任务...");
+
     try {
-      const res = await fetch("/api/supply-chain", {
+      const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ need, region, quantity, budget, certifications, count }),
+        body: JSON.stringify({
+          type: "supply-chain",
+          input: { need, region, quantity, budget, certifications, count },
+          userId: "demo-user",
+        }),
       });
-      const data = await res.json();
-      setSuppliers(data.suppliers || []);
-    } finally {
+      if (!res.ok) { setLoading(false); return; }
+      const { jobId } = await res.json();
+      trackJob(jobId);
+      startPolling(jobId);
+    } catch {
       setLoading(false);
     }
   };
@@ -322,9 +391,18 @@ export default function SupplyChainPage() {
           </div>
 
           {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mr-3" />
-              <span className="text-muted text-sm">正在全球搜索供应商...</span>
+            <div className="bg-white border border-border rounded-xl p-6">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
+                <span className="text-sm text-primary font-medium">{statusMsg || "正在全球搜索供应商..."}</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted mt-2">你可以切换到其他页面，搜索在后台继续进行</p>
             </div>
           )}
 

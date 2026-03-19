@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { TARGET_MARKETS } from "@/lib/constants";
+import { useTask } from "@/contexts/TaskContext";
 
 interface Recommendation {
   category: string;
@@ -31,6 +32,8 @@ export default function RadarPage() {
   const [capability, setCapability] = useState("");
   const [markets, setMarkets] = useState<string[]>(["美国"]);
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [statusMsg, setStatusMsg] = useState("");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
 
   // Extra fields
@@ -40,6 +43,9 @@ export default function RadarPage() {
   const [exportExp, setExportExp] = useState("");
   const [competitors, setCompetitors] = useState("");
   const [showExtra, setShowExtra] = useState(false);
+
+  const { trackJob } = useTask();
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const toggleMarket = (m: string) => {
     setMarkets((prev) =>
@@ -51,19 +57,82 @@ export default function RadarPage() {
     setCerts((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
   };
 
+  // On mount: resume any running radar job
+  useEffect(() => {
+    const resume = async () => {
+      try {
+        const res = await fetch("/api/jobs?userId=demo-user");
+        if (!res.ok) return;
+        const { jobs } = await res.json();
+        const activeJob = jobs.find(
+          (j: { type: string; status: string }) =>
+            j.type === "radar" && (j.status === "pending" || j.status === "running")
+        );
+        if (activeJob) {
+          setLoading(true);
+          setProgress(activeJob.progress || 0);
+          setStatusMsg(activeJob.message || "分析进行中...");
+          startPolling(activeJob.id);
+        }
+      } catch { /* ignore */ }
+    };
+    resume();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const startPolling = (jobId: string) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/jobs/${jobId}`);
+        if (!res.ok) return;
+        const { job } = await res.json();
+        setProgress(job.progress || 0);
+        setStatusMsg(job.message || "分析中...");
+
+        if (job.status === "completed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setLoading(false);
+          const output = job.output as { recommendations?: Recommendation[] };
+          setRecommendations(output?.recommendations || []);
+        } else if (job.status === "failed") {
+          if (pollRef.current) clearInterval(pollRef.current);
+          pollRef.current = null;
+          setLoading(false);
+          setStatusMsg("分析遇到问题，请重试");
+        }
+      } catch { /* ignore */ }
+    };
+
+    poll();
+    pollRef.current = setInterval(poll, 3000);
+  };
+
   const handleAnalyze = async () => {
     if (!capability.trim()) return;
     setLoading(true);
     setRecommendations([]);
+    setProgress(0);
+    setStatusMsg("正在启动分析任务...");
+
     try {
-      const res = await fetch("/api/radar", {
+      const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ capability, markets, capacity, priceRange, certifications: certs, exportExp, competitors }),
+        body: JSON.stringify({
+          type: "radar",
+          input: { capability, markets, capacity, priceRange, certifications: certs, exportExp, competitors },
+          userId: "demo-user",
+        }),
       });
-      const data = await res.json();
-      setRecommendations(data.recommendations || []);
-    } finally {
+      if (!res.ok) { setLoading(false); return; }
+      const { jobId } = await res.json();
+      trackJob(jobId);
+      startPolling(jobId);
+    } catch {
       setLoading(false);
     }
   };
@@ -217,9 +286,18 @@ export default function RadarPage() {
           </div>
 
           {loading && (
-            <div className="flex items-center justify-center py-12">
-              <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mr-3" />
-              <span className="text-muted text-sm">AI正在分析全球市场机会...</span>
+            <div className="bg-white border border-border rounded-xl p-6">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
+                <span className="text-sm text-primary font-medium">{statusMsg || "AI正在分析全球市场机会..."}</span>
+              </div>
+              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-500"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted mt-2">你可以切换到其他页面，分析在后台继续进行</p>
             </div>
           )}
 
