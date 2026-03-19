@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
 import { SearchModal } from "@/components/buyer/SearchModal";
 import { BuyerCard } from "@/components/buyer/BuyerCard";
 import { BuyerDetailDrawer } from "@/components/buyer/BuyerDetailDrawer";
 import { ErrorBoundary, DrawerErrorBoundary } from "@/components/ErrorBoundary";
-import { normalizeBuyer, normalizeBuyerArray } from "@/lib/normalizeBuyer";
+import { normalizeBuyerArray } from "@/lib/normalizeBuyer";
 import { IntentPopupContainer, useIntentEvents } from "@/components/buyer/IntentPopup";
 import { SELLER_PROFILE_KEY } from "@/lib/constants";
-import { useTask } from "@/contexts/TaskContext";
+import { useJobPoller } from "@/hooks/useJobPoller";
+import { apiFetch } from "@/lib/apiClient";
+import { JobProgressCard } from "@/components/ui/JobProgressCard";
 import type { SellerProfile } from "@/lib/constants";
 import type { SupplierWeaknessResult } from "@/services/supplierWeakness";
 import type { CompetitorData, SocialDynamics } from "@/services/intelligenceAgent";
@@ -78,31 +80,47 @@ const USER_ID = "demo-user";
 
 export default function BuyersPage() {
   const [showModal, setShowModal] = useState(false);
-  const [status, setStatus] = useState<SearchStatus>("idle");
-  const [statusMsg, setStatusMsg] = useState("");
   const [buyers, setBuyers] = useState<BuyerResult[]>([]);
   const [foundCount, setFoundCount] = useState(0);
   const [selectedBuyer, setSelectedBuyer] = useState<BuyerResult | null>(null);
-  const [progress, setProgress] = useState(0);
-  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
-  const buyerCountRef = useRef(0);
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
-
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<PastSession[]>([]);
   const [showHistory, setShowHistory] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [historyMsg, setHistoryMsg] = useState("");
   const [savedProfile, setSavedProfile] = useState<SellerProfile | null>(null);
-
-  const { toasts, pushEvent, dismiss } = useIntentEvents();
-  const { trackJob, getJob } = useTask();
-
-  // Filter states
   const [filterCountry, setFilterCountry] = useState("all");
   const [filterIndustry, setFilterIndustry] = useState("all");
   const [filterScore, setFilterScore] = useState<ScoreFilter>("all");
 
-  // Load saved global profile
+  const { toasts, pushEvent, dismiss } = useIntentEvents();
+
+  // Buyer-specific extra polling: also poll intermediate DB results while job runs
+  const lastBuyerCount = { current: 0 };
+
+  const { jobStatus, progress, message, errorMsg, jobId: currentJobId, startJob, resumeJob, reset } = useJobPoller({
+    jobType: "buyer",
+    onCompleted: async (output, jid) => {
+      // Load final buyers from DB
+      const sid = activeSessionId || (output as { sessionId?: string })?.sessionId;
+      if (sid) {
+        const { data } = await apiFetch<{ buyers: unknown[] }>(`/api/buyers?sessionId=${sid}&userId=${USER_ID}`);
+        if (data?.buyers) {
+          const loaded = normalizeBuyerArray(data.buyers);
+          loaded.sort((a, b) => b.matchScore - a.matchScore);
+          setBuyers(loaded);
+          setFoundCount(loaded.length);
+        }
+      }
+      // Refresh sessions list
+      apiFetch<{ sessions: PastSession[] }>(`/api/sessions?userId=${USER_ID}`)
+        .then(({ data }) => setSessions(data?.sessions || []));
+    },
+  });
+
+  const isRunning = jobStatus === "starting" || jobStatus === "running";
+
+  // Load saved profile
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SELLER_PROFILE_KEY);
@@ -110,223 +128,93 @@ export default function BuyersPage() {
     } catch { /* ignore */ }
   }, []);
 
-  // Load past sessions on mount
+  // Load past sessions
   useEffect(() => {
-    fetch(`/api/sessions?userId=${USER_ID}`)
-      .then((r) => r.json())
-      .then((data) => setSessions(data.sessions || []))
-      .catch(() => {});
+    apiFetch<{ sessions: PastSession[] }>(`/api/sessions?userId=${USER_ID}`)
+      .then(({ data }) => setSessions(data?.sessions || []));
   }, []);
+
+  // On mount: auto-resume any running buyer job
+  useEffect(() => {
+    apiFetch<{ jobs: { id: string; type: string; status: string; progress: number; message: string; sessionId?: string }[] }>(
+      `/api/jobs?userId=${USER_ID}`,
+      { timeoutMs: 5_000, retries: 1 }
+    ).then(({ data }) => {
+      const active = data?.jobs?.find(
+        (j) => j.type === "buyer" && (j.status === "pending" || j.status === "running")
+      );
+      if (active) {
+        if (active.sessionId) setActiveSessionId(active.sessionId);
+        resumeJob(active.id, active.progress, active.message);
+      }
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Poll intermediate buyers from DB while job is running
+  useEffect(() => {
+    if (!isRunning || !activeSessionId) return;
+    const id = setInterval(async () => {
+      const { data } = await apiFetch<{ buyers: unknown[] }>(
+        `/api/buyers?sessionId=${activeSessionId}&userId=${USER_ID}`,
+        { timeoutMs: 8_000, retries: 0 }
+      );
+      if (data?.buyers) {
+        const loaded = normalizeBuyerArray(data.buyers);
+        if (loaded.length > lastBuyerCount.current) {
+          loaded.sort((a, b) => b.matchScore - a.matchScore);
+          setBuyers(loaded);
+          setFoundCount(loaded.length);
+          loaded.slice(lastBuyerCount.current).forEach((b) => {
+            if (b.matchScore >= 70) pushEvent({ companyName: b.companyName, event: "new_buyer_found", detail: `匹配度 ${b.matchScore} · ${b.country}` });
+          });
+          lastBuyerCount.current = loaded.length;
+        }
+      }
+    }, 5_000);
+    return () => clearInterval(id);
+  }, [isRunning, activeSessionId, pushEvent]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadSession = async (sessionId: string) => {
     setLoadingHistory(true);
     setShowHistory(false);
     setActiveSessionId(sessionId);
     setBuyers([]);
-    setStatus("completed");
-    setFilterCountry("all");
-    setFilterIndustry("all");
-    setFilterScore("all");
+    setHistoryMsg("");
+    setFilterCountry("all"); setFilterIndustry("all"); setFilterScore("all");
 
-    try {
-      const res = await fetch(`/api/buyers?sessionId=${sessionId}&userId=${USER_ID}`);
-      const data = await res.json();
-      const loaded: BuyerResult[] = normalizeBuyerArray(data.buyers);
+    const { data, ok } = await apiFetch<{ buyers: unknown[] }>(
+      `/api/buyers?sessionId=${sessionId}&userId=${USER_ID}`,
+      { timeoutMs: 15_000, retries: 2 }
+    );
+    setLoadingHistory(false);
+    if (ok && data?.buyers) {
+      const loaded = normalizeBuyerArray(data.buyers);
       setBuyers(loaded.sort((a, b) => b.matchScore - a.matchScore));
-      setStatusMsg(`已加载 ${loaded.length} 家历史买家`);
       setFoundCount(loaded.length);
-    } catch {
-      setStatusMsg("加载历史记录失败");
-    } finally {
-      setLoadingHistory(false);
+      setHistoryMsg(`已加载 ${loaded.length} 家历史买家`);
+    } else {
+      setHistoryMsg("加载历史记录失败，请重试");
     }
   };
 
   const handleStageChange = (buyerIdOrDomain: string, stage: string) => {
-    setBuyers((prev) =>
-      prev.map((b) =>
-        b.id === buyerIdOrDomain || b.domain === buyerIdOrDomain
-          ? { ...b, funnelStage: stage }
-          : b
-      )
-    );
-    // Track via API (best effort)
-    if (buyerIdOrDomain.length > 10) {
-      fetch(`/api/buyers/${buyerIdOrDomain}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ funnelStage: stage }),
-      }).catch(() => {});
-    }
+    setBuyers((prev) => prev.map((b) => b.id === buyerIdOrDomain || b.domain === buyerIdOrDomain ? { ...b, funnelStage: stage } : b));
+    apiFetch(`/api/buyers/${buyerIdOrDomain}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ funnelStage: stage }),
+      retries: 1,
+    } as Parameters<typeof apiFetch>[1]).catch(() => {});
   };
 
-  // Poll a job and update UI accordingly. Also polls intermediate buyers from DB.
-  const startPolling = useCallback(
-    (jobId: string, sessionIdOverride?: string) => {
-      if (pollRef.current) clearInterval(pollRef.current);
-
-      let lastBuyerCount = 0;
-      let knownSessionId = sessionIdOverride || null;
-
-      const poll = async () => {
-        try {
-          const res = await fetch(`/api/jobs/${jobId}`);
-          if (!res.ok) return;
-          const { job } = await res.json();
-
-          setProgress(job.progress || 0);
-          setStatusMsg(job.message || "处理中...");
-
-          if (job.sessionId && !knownSessionId) {
-            knownSessionId = job.sessionId;
-            setActiveSessionId(knownSessionId);
-          }
-
-          // Load intermediate buyers from DB while job is running
-          if (knownSessionId) {
-            const bRes = await fetch(`/api/buyers?sessionId=${knownSessionId}&userId=${USER_ID}`).catch(() => null);
-            if (bRes?.ok) {
-              const bData = await bRes.json();
-              const loaded: BuyerResult[] = normalizeBuyerArray(bData.buyers || []);
-              if (loaded.length > lastBuyerCount) {
-                loaded.sort((a, b) => b.matchScore - a.matchScore);
-                setBuyers(loaded);
-                buyerCountRef.current = loaded.length;
-                setFoundCount(loaded.length);
-                // Pop intent notifications for new high-score buyers
-                loaded.slice(lastBuyerCount).forEach((b) => {
-                  if (b.matchScore >= 70) {
-                    pushEvent({
-                      companyName: b.companyName,
-                      event: "new_buyer_found",
-                      detail: `匹配度 ${b.matchScore} · ${b.country}`,
-                    });
-                  }
-                });
-                lastBuyerCount = loaded.length;
-              }
-            }
-          }
-
-          if (job.status === "completed") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            pollRef.current = null;
-            setStatus("completed");
-            setProgress(100);
-            const finalCount = (job.output as { foundCount?: number })?.foundCount || lastBuyerCount;
-            setFoundCount(finalCount);
-            setStatusMsg(`已找到 ${finalCount} 家匹配买家`);
-            // Final load
-            const sid = knownSessionId || (job.output as { sessionId?: string })?.sessionId;
-            if (sid) {
-              setActiveSessionId(sid);
-              const bRes = await fetch(`/api/buyers?sessionId=${sid}&userId=${USER_ID}`).catch(() => null);
-              if (bRes?.ok) {
-                const bData = await bRes.json();
-                const loaded = normalizeBuyerArray(bData.buyers || []);
-                loaded.sort((a, b) => b.matchScore - a.matchScore);
-                setBuyers(loaded);
-                setFoundCount(loaded.length);
-                setStatusMsg(`已找到 ${loaded.length} 家匹配买家`);
-              }
-            }
-            // Refresh sessions list
-            fetch(`/api/sessions?userId=${USER_ID}`)
-              .then((r) => r.json())
-              .then((d) => setSessions(d.sessions || []))
-              .catch(() => {});
-          } else if (job.status === "failed") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            pollRef.current = null;
-            setStatus("completed");
-            setStatusMsg("搜索遇到问题，已返回现有结果");
-          }
-        } catch {
-          // network error, keep polling
-        }
-      };
-
-      poll();
-      pollRef.current = setInterval(poll, 3000);
-    },
-    [pushEvent]
-  );
-
-  // On mount: resume any running buyer job
-  useEffect(() => {
-    const resumeJob = async () => {
-      try {
-        const res = await fetch(`/api/jobs?userId=${USER_ID}`);
-        if (!res.ok) return;
-        const { jobs } = await res.json();
-        const runningBuyerJob = jobs.find(
-          (j: { type: string; status: string }) =>
-            j.type === "buyer" && (j.status === "pending" || j.status === "running")
-        );
-        if (runningBuyerJob) {
-          setCurrentJobId(runningBuyerJob.id);
-          setStatus("running");
-          setStatusMsg(runningBuyerJob.message || "搜索进行中...");
-          setProgress(runningBuyerJob.progress || 0);
-          startPolling(runningBuyerJob.id, runningBuyerJob.sessionId);
-        }
-      } catch { /* ignore */ }
-    };
-    resumeJob();
-
-    return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-    };
-  }, [startPolling]);
-
-  const handleSearchStart = async (params: {
-    productName: string;
-    productDescription: string;
-    targetCountries: string[];
-    targetCount: number;
-    userId: string;
-  }) => {
+  const handleSearchStart = (params: { productName: string; productDescription: string; targetCountries: string[]; targetCount: number; userId: string }) => {
     setShowModal(false);
-    setStatus("running");
     setBuyers([]);
     setFoundCount(0);
-    setProgress(0);
-    setStatusMsg("正在启动搜索任务...");
-    buyerCountRef.current = 0;
     setActiveSessionId(null);
-    setFilterCountry("all");
-    setFilterIndustry("all");
-    setFilterScore("all");
-
-    try {
-      const res = await fetch("/api/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "buyer", input: params, userId: params.userId }),
-      });
-
-      if (!res.ok) {
-        // Don't hide — retry once after 1s
-        setStatusMsg("启动失败，正在重试...");
-        setTimeout(() => handleSearchStart(params), 1000);
-        return;
-      }
-
-      const data = await res.json();
-      const jobId = data?.jobId;
-      if (!jobId) {
-        setStatusMsg("启动失败，请稍后重试");
-        return;
-      }
-
-      setCurrentJobId(jobId);
-      trackJob(jobId);
-      startPolling(jobId);
-    } catch (err) {
-      console.error("[buyers] handleSearchStart error:", err);
-      setStatusMsg("网络错误，请检查连接后重试");
-      // Keep status="running" so progress bar stays visible
-    }
+    setFilterCountry("all"); setFilterIndustry("all"); setFilterScore("all");
+    lastBuyerCount.current = 0;
+    startJob(params);
   };
 
   // Derived filter options from current buyers
@@ -431,22 +319,21 @@ export default function BuyersPage() {
         </div>
       </div>
 
-      {/* Status Bar */}
-      {status === "running" && (
-        <div className="px-6 py-3 bg-primary/5 border-b border-primary/20">
-          <div className="flex items-center gap-3">
-            <div className="w-3 h-3 rounded-full bg-primary animate-pulse" />
-            <span className="text-sm text-primary font-medium">{statusMsg}</span>
-            {foundCount > 0 && (
-              <span className="text-sm text-muted ml-auto">已找到 {foundCount} 家</span>
-            )}
-          </div>
-          <div className="mt-2 h-1 bg-primary/20 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-500"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
+      {/* Status Bar — running / error */}
+      {(isRunning || jobStatus === "error") && (
+        <div className="px-6 py-3 border-b border-border">
+          <JobProgressCard
+            jobStatus={jobStatus}
+            progress={progress}
+            message={message}
+            errorMsg={errorMsg}
+            onRetry={() => setShowModal(true)}
+            onDismiss={reset}
+            idleLabel="正在全网搜索买家..."
+          />
+          {foundCount > 0 && isRunning && (
+            <p className="text-xs text-muted mt-1">已找到 {foundCount} 家，持续搜索中...</p>
+          )}
         </div>
       )}
 
@@ -459,9 +346,15 @@ export default function BuyersPage() {
         </div>
       )}
 
-      {status === "completed" && buyers.length > 0 && !loadingHistory && (
+      {historyMsg && !loadingHistory && buyers.length > 0 && (
         <div className="px-6 py-2 bg-success/5 border-b border-success/20">
-          <p className="text-sm text-success font-medium">✓ {statusMsg}</p>
+          <p className="text-sm text-success font-medium">✓ {historyMsg}</p>
+        </div>
+      )}
+
+      {jobStatus === "completed" && buyers.length > 0 && (
+        <div className="px-6 py-2 bg-success/5 border-b border-success/20">
+          <p className="text-sm text-success font-medium">✓ 已找到 {foundCount} 家匹配买家</p>
         </div>
       )}
 
@@ -544,7 +437,7 @@ export default function BuyersPage() {
       <div className="flex-1 overflow-auto p-6" onClick={() => showHistory && setShowHistory(false)}>
 
         {/* Profile banner */}
-        {savedProfile && buyers.length === 0 && status === "idle" && (
+        {savedProfile && buyers.length === 0 && jobStatus === "idle" && (
           <div className="mb-4 flex items-center gap-3 bg-primary/5 border border-primary/20 rounded-xl px-4 py-3">
             <span className="text-xl">✅</span>
             <div className="flex-1 min-w-0">
@@ -560,7 +453,7 @@ export default function BuyersPage() {
           </div>
         )}
 
-        {status === "idle" && buyers.length === 0 && (
+        {jobStatus === "idle" && buyers.length === 0 && (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="text-5xl mb-4">🎯</div>
             <h2 className="text-xl font-semibold text-foreground mb-2">开始智能找买家</h2>
@@ -630,7 +523,7 @@ export default function BuyersPage() {
                 </div>
               ))}
             </div>
-            {status === "running" && (
+            {isRunning && (
               <div className="flex items-center justify-center py-8">
                 <div className="flex items-center gap-3 text-muted text-sm">
                   <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />

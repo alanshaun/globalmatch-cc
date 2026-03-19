@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { TARGET_MARKETS } from "@/lib/constants";
-import { useTask } from "@/contexts/TaskContext";
+import { useJobPoller } from "@/hooks/useJobPoller";
+import { apiFetch } from "@/lib/apiClient";
+import { JobProgressCard } from "@/components/ui/JobProgressCard";
 
 interface Recommendation {
   category: string;
@@ -31,12 +33,7 @@ const EXPORT_EXP_OPTIONS = ["无出口经验", "有少量出口", "有稳定出�
 export default function RadarPage() {
   const [capability, setCapability] = useState("");
   const [markets, setMarkets] = useState<string[]>(["美国"]);
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [statusMsg, setStatusMsg] = useState("");
   const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-
-  // Extra fields
   const [capacity, setCapacity] = useState("");
   const [priceRange, setPriceRange] = useState("");
   const [certs, setCerts] = useState<string[]>([]);
@@ -44,104 +41,39 @@ export default function RadarPage() {
   const [competitors, setCompetitors] = useState("");
   const [showExtra, setShowExtra] = useState(false);
 
-  const { trackJob } = useTask();
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const { jobStatus, progress, message, errorMsg, startJob, resumeJob, reset } = useJobPoller({
+    jobType: "radar",
+    onCompleted: (output) => {
+      const o = output as { recommendations?: Recommendation[] };
+      setRecommendations(o?.recommendations || []);
+    },
+  });
 
-  const toggleMarket = (m: string) => {
-    setMarkets((prev) =>
-      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]
-    );
-  };
+  const isActive = jobStatus === "starting" || jobStatus === "running";
 
-  const toggleCert = (c: string) => {
+  const toggleMarket = (m: string) =>
+    setMarkets((prev) => prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]);
+
+  const toggleCert = (c: string) =>
     setCerts((prev) => prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]);
-  };
 
-  // On mount: resume any running radar job
+  // On mount: auto-resume any running radar job
   useEffect(() => {
-    const resume = async () => {
-      try {
-        const res = await fetch("/api/jobs?userId=demo-user");
-        if (!res.ok) return;
-        const { jobs } = await res.json();
-        const activeJob = jobs.find(
-          (j: { type: string; status: string }) =>
-            j.type === "radar" && (j.status === "pending" || j.status === "running")
-        );
-        if (activeJob) {
-          setLoading(true);
-          setProgress(activeJob.progress || 0);
-          setStatusMsg(activeJob.message || "分析进行中...");
-          startPolling(activeJob.id);
-        }
-      } catch { /* ignore */ }
-    };
-    resume();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    apiFetch<{ jobs: { id: string; type: string; status: string; progress: number; message: string }[] }>(
+      "/api/jobs?userId=demo-user",
+      { timeoutMs: 5_000, retries: 1 }
+    ).then(({ data }) => {
+      const active = data?.jobs?.find(
+        (j) => j.type === "radar" && (j.status === "pending" || j.status === "running")
+      );
+      if (active) resumeJob(active.id, active.progress, active.message);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const startPolling = (jobId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/jobs/${jobId}`);
-        if (!res.ok) return;
-        const { job } = await res.json();
-        setProgress(job.progress || 0);
-        setStatusMsg(job.message || "分析中...");
-
-        if (job.status === "completed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          setLoading(false);
-          const output = job.output as { recommendations?: Recommendation[] };
-          setRecommendations(output?.recommendations || []);
-        } else if (job.status === "failed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          setLoading(false);
-          setStatusMsg("分析遇到问题，请重试");
-        }
-      } catch { /* ignore */ }
-    };
-
-    poll();
-    pollRef.current = setInterval(poll, 3000);
-  };
-
-  const handleAnalyze = async () => {
+  const handleAnalyze = () => {
     if (!capability.trim()) return;
-    setLoading(true);
     setRecommendations([]);
-    setProgress(0);
-    setStatusMsg("正在启动分析任务...");
-
-    try {
-      const res = await fetch("/api/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "radar",
-          input: { capability, markets, capacity, priceRange, certifications: certs, exportExp, competitors },
-          userId: "demo-user",
-        }),
-      });
-      if (!res.ok) {
-        setStatusMsg("启动失败，正在重试...");
-        setTimeout(() => handleAnalyze(), 1000);
-        return;
-      }
-      const data = await res.json();
-      const jobId = data?.jobId;
-      if (!jobId) { setStatusMsg("启动失败，请重试"); return; }
-      trackJob(jobId);
-      startPolling(jobId);
-    } catch (err) {
-      console.error("[radar] handleAnalyze error:", err);
-      setStatusMsg("网络错误，请检查连接后重试");
-    }
+    startJob({ capability, markets, capacity, priceRange, certifications: certs, exportExp, competitors });
   };
 
   return (
@@ -285,28 +217,22 @@ export default function RadarPage() {
 
             <button
               onClick={handleAnalyze}
-              disabled={loading || !capability.trim() || markets.length === 0}
+              disabled={isActive || !capability.trim() || markets.length === 0}
               className="w-full py-2.5 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
             >
-              {loading ? "正在分析市场..." : "开始选品分析 →"}
+              {isActive ? "正在分析市场..." : "开始选品分析 →"}
             </button>
           </div>
 
-          {loading && (
-            <div className="bg-white border border-border rounded-xl p-6">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
-                <span className="text-sm text-primary font-medium">{statusMsg || "AI正在分析全球市场机会..."}</span>
-              </div>
-              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-500"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-muted mt-2">你可以切换到其他页面，分析在后台继续进行</p>
-            </div>
-          )}
+          <JobProgressCard
+            jobStatus={jobStatus}
+            progress={progress}
+            message={message}
+            errorMsg={errorMsg}
+            onRetry={handleAnalyze}
+            onDismiss={reset}
+            idleLabel="AI正在分析全球市场机会..."
+          />
 
           <div className="space-y-4">
             {recommendations.map((rec, idx) => (

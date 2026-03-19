@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useTask } from "@/contexts/TaskContext";
+import { useState, useEffect } from "react";
+import { useJobPoller } from "@/hooks/useJobPoller";
+import { apiFetch } from "@/lib/apiClient";
+import { JobProgressCard } from "@/components/ui/JobProgressCard";
 
 interface Supplier {
   companyName: string;
@@ -190,101 +192,35 @@ export default function SupplyChainPage() {
   const [certifications, setCertifications] = useState<string[]>([]);
   const [count, setCount] = useState(10);
   const [showCerts, setShowCerts] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [statusMsg, setStatusMsg] = useState("");
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
-  const { trackJob } = useTask();
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const { jobStatus, progress, message, errorMsg, startJob, resumeJob, reset } = useJobPoller({
+    jobType: "supply-chain",
+    onCompleted: (output) => {
+      const o = output as { suppliers?: Supplier[] };
+      setSuppliers(o?.suppliers || []);
+    },
+  });
 
-  // On mount: resume any running supply-chain job
+  const isActive = jobStatus === "starting" || jobStatus === "running";
+
+  // On mount: auto-resume any running supply-chain job
   useEffect(() => {
-    const resume = async () => {
-      try {
-        const res = await fetch("/api/jobs?userId=demo-user");
-        if (!res.ok) return;
-        const { jobs } = await res.json();
-        const activeJob = jobs.find(
-          (j: { type: string; status: string }) =>
-            j.type === "supply-chain" && (j.status === "pending" || j.status === "running")
-        );
-        if (activeJob) {
-          setLoading(true);
-          setProgress(activeJob.progress || 0);
-          setStatusMsg(activeJob.message || "搜索进行中...");
-          startPolling(activeJob.id);
-        }
-      } catch { /* ignore */ }
-    };
-    resume();
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    apiFetch<{ jobs: { id: string; type: string; status: string; progress: number; message: string }[] }>(
+      "/api/jobs?userId=demo-user",
+      { timeoutMs: 5_000, retries: 1 }
+    ).then(({ data }) => {
+      const active = data?.jobs?.find(
+        (j) => j.type === "supply-chain" && (j.status === "pending" || j.status === "running")
+      );
+      if (active) resumeJob(active.id, active.progress, active.message);
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const startPolling = (jobId: string) => {
-    if (pollRef.current) clearInterval(pollRef.current);
-
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/jobs/${jobId}`);
-        if (!res.ok) return;
-        const { job } = await res.json();
-        setProgress(job.progress || 0);
-        setStatusMsg(job.message || "搜索中...");
-
-        if (job.status === "completed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          setLoading(false);
-          const output = job.output as { suppliers?: Supplier[] };
-          setSuppliers(output?.suppliers || []);
-        } else if (job.status === "failed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          pollRef.current = null;
-          setLoading(false);
-          setStatusMsg("搜索遇到问题，请重试");
-        }
-      } catch { /* ignore */ }
-    };
-
-    poll();
-    pollRef.current = setInterval(poll, 3000);
-  };
-
-  const handleSearch = async () => {
+  const handleSearch = () => {
     if (!need.trim()) return;
-    setLoading(true);
     setSuppliers([]);
-    setProgress(0);
-    setStatusMsg("正在启动搜索任务...");
-
-    try {
-      const res = await fetch("/api/jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "supply-chain",
-          input: { need, region, quantity, budget, certifications, count },
-          userId: "demo-user",
-        }),
-      });
-      if (!res.ok) {
-        setStatusMsg("启动失败，正在重试...");
-        // Retry once after 1s
-        setTimeout(() => handleSearch(), 1000);
-        return;
-      }
-      const data = await res.json();
-      const jobId = data?.jobId;
-      if (!jobId) { setStatusMsg("启动失败，请重试"); return; }
-      trackJob(jobId);
-      startPolling(jobId);
-    } catch (err) {
-      console.error("[supply-chain] handleSearch error:", err);
-      setStatusMsg("网络错误，请检查连接后重试");
-      // Don't hide loading — show error in progress area
-    }
+    startJob({ need, region, quantity, budget, certifications, count });
   };
 
   return (
@@ -391,29 +327,23 @@ export default function SupplyChainPage() {
 
               <button
                 onClick={handleSearch}
-                disabled={loading || !need.trim()}
+                disabled={isActive || !need.trim()}
                 className="px-5 py-2 bg-primary text-white rounded-lg text-sm font-medium hover:bg-primary-600 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
               >
-                {loading ? "搜索中..." : "开始搜索 →"}
+                {isActive ? "搜索中..." : "开始搜索 →"}
               </button>
             </div>
           </div>
 
-          {loading && (
-            <div className="bg-white border border-border rounded-xl p-6">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin shrink-0" />
-                <span className="text-sm text-primary font-medium">{statusMsg || "正在全球搜索供应商..."}</span>
-              </div>
-              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-500"
-                  style={{ width: `${progress}%` }}
-                />
-              </div>
-              <p className="text-xs text-muted mt-2">你可以切换到其他页面，搜索在后台继续进行</p>
-            </div>
-          )}
+          <JobProgressCard
+            jobStatus={jobStatus}
+            progress={progress}
+            message={message}
+            errorMsg={errorMsg}
+            onRetry={handleSearch}
+            onDismiss={reset}
+            idleLabel="正在全球搜索供应商..."
+          />
 
           {suppliers.length > 0 && (
             <div className="mb-3 flex items-center justify-between">

@@ -16,20 +16,26 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 export function TaskBadge() {
-  const { jobs, activeCount } = useTask();
+  const { jobs, activeCount, networkOk } = useTask();
   const [open, setOpen] = useState(false);
 
   const recentJobs = jobs.slice(0, 10);
 
-  if (recentJobs.length === 0) return null;
-
   return (
+    <div className="flex items-center gap-2">
+      {!networkOk && (
+        <span className="text-xs text-danger bg-danger/10 border border-danger/20 px-2 py-1 rounded-lg">
+          ⚠ 连接中断，重试中...
+        </span>
+      )}
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
           activeCount > 0
-            ? "bg-primary text-white border-primary shadow-sm animate-pulse-slow"
+            ? "bg-primary text-white border-primary shadow-sm"
+            : recentJobs.length === 0
+            ? "hidden"
             : "bg-white text-foreground border-border hover:border-primary/50"
         }`}
       >
@@ -95,6 +101,7 @@ export function TaskBadge() {
           </div>
         </>
       )}
+    </div>
     </div>
   );
 }
