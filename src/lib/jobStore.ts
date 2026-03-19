@@ -1,10 +1,8 @@
 /**
- * In-memory job store — works even without a database.
- * Jobs are persisted to DB when available (best-effort), but the
- * in-memory store is always the source of truth for the current process.
+ * In-memory job store — NEVER fails, works without any database.
+ * DB sync is completely optional and lazy — loaded only when needed.
+ * If Prisma/DB is unavailable, in-memory operations still succeed.
  */
-
-import { prisma } from "./db";
 
 export interface JobState {
   id: string;
@@ -29,6 +27,49 @@ function cuid(): string {
   return `job_${ts}_${rand}`;
 }
 
+// Lazy DB accessor — never throws at module load time
+function getDB() {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("./db").prisma as import("@prisma/client").PrismaClient;
+  } catch {
+    return null;
+  }
+}
+
+function syncCreate(job: JobState, input: unknown) {
+  try {
+    const db = getDB();
+    if (!db) return;
+    db.searchJob
+      .create({
+        data: {
+          id: job.id,
+          type: job.type,
+          input: input as object,
+          userId: job.userId,
+          status: "pending",
+          message: job.message,
+        },
+      })
+      .catch(() => {});
+  } catch {
+    // DB unavailable — in-memory works fine
+  }
+}
+
+function syncUpdate(jobId: string, updates: Partial<JobState>) {
+  try {
+    const db = getDB();
+    if (!db) return;
+    db.searchJob
+      .update({ where: { id: jobId }, data: updates as Record<string, unknown> })
+      .catch(() => {});
+  } catch {
+    // DB unavailable — ignore
+  }
+}
+
 export function createJob(type: string, input: unknown, userId: string): JobState {
   const job: JobState = {
     id: cuid(),
@@ -40,12 +81,7 @@ export function createJob(type: string, input: unknown, userId: string): JobStat
     createdAt: new Date().toISOString(),
   };
   store.set(job.id, job);
-
-  // Persist to DB (fire-and-forget — if it fails, in-memory still works)
-  prisma.searchJob
-    .create({ data: { id: job.id, type, input: input as object, userId, status: "pending", message: job.message } })
-    .catch(() => {});
-
+  syncCreate(job, input);
   return job;
 }
 
@@ -64,20 +100,18 @@ export function updateJob(jobId: string, updates: Partial<JobState>): void {
   const job = store.get(jobId);
   if (!job) return;
   Object.assign(job, updates);
-
-  // Sync to DB best-effort
-  prisma.searchJob
-    .update({ where: { id: jobId }, data: updates as Record<string, unknown> })
-    .catch(() => {});
+  syncUpdate(jobId, updates);
 }
 
 /**
- * On startup: load recent jobs from DB into memory so jobs survive
- * a server restart (when DB is available).
+ * On startup: load recent jobs from DB into memory (optional).
+ * Safe to call even when DB is unavailable.
  */
 export async function hydrateFromDB(): Promise<void> {
   try {
-    const jobs = await prisma.searchJob.findMany({
+    const db = getDB();
+    if (!db) return;
+    const jobs = await db.searchJob.findMany({
       where: { createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) } },
       orderBy: { createdAt: "desc" },
       take: 100,
