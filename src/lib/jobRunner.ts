@@ -213,15 +213,17 @@ async function runSupplyChainJob(
       "You generate B2B supplier search queries.",
       { keywords: [input.need, `${input.need} manufacturer`, `${input.need} factory`, `${input.need} supplier`] }
     );
-
-    updateJob(jobId, { progress: 25, message: "正在全网搜索供应商..." });
-
     const queries = (keywordsResult?.keywords ?? []).filter(Boolean).slice(0, 5);
     const safeQueries = queries.length > 0
       ? queries
       : [input.need, `${input.need} manufacturer`, `${input.need} supplier`, `${input.need} factory`];
+    console.log(`[关键词生成] 状态：成功 | generatedBy：${keywordsResult.generatedBy} | 关键词数：${safeQueries.length} | 关键词：${JSON.stringify(safeQueries)}`);
+
+    updateJob(jobId, { progress: 25, message: "正在全网搜索供应商..." });
+
     const regionTerm = COUNTRY_SEARCH_TERMS[input.region] || "China";
     const fullQueries = safeQueries.map((q) => `${q} ${regionTerm} manufacturer`);
+    console.log(`[搜索构建] region：${input.region} | regionTerm：${regionTerm} | fullQueries：${JSON.stringify(fullQueries.slice(0, 3))}`);
 
     const [serpResults, ddgResults] = await Promise.allSettled([
       searchViaSerpAPI(input.need, safeQueries, [input.region], COUNTRY_SEARCH_TERMS),
@@ -229,10 +231,21 @@ async function runSupplyChainJob(
     ]);
 
     const allDomains: string[] = [];
-    if (serpResults.status === "fulfilled") allDomains.push(...serpResults.value.map((r) => r.domain));
-    if (ddgResults.status === "fulfilled") allDomains.push(...ddgResults.value.map((r) => r.domain));
+    if (serpResults.status === "fulfilled") {
+      console.log(`[SerpAPI] 状态：成功 | 获取原始结果：${serpResults.value.length} 条 | 示例域名：${serpResults.value.slice(0,3).map(r=>r.domain).join(", ") || "无"}`);
+      allDomains.push(...serpResults.value.map((r) => r.domain));
+    } else {
+      console.log(`[SerpAPI] 状态：失败 | 原因：${serpResults.reason}`);
+    }
+    if (ddgResults.status === "fulfilled") {
+      console.log(`[DDG搜索] 状态：成功 | 获取原始结果：${ddgResults.value.length} 条 | 示例域名：${ddgResults.value.slice(0,3).map(r=>r.domain).join(", ") || "无"}`);
+      allDomains.push(...ddgResults.value.map((r) => r.domain));
+    } else {
+      console.log(`[DDG搜索] 状态：失败 | 原因：${ddgResults.reason}`);
+    }
 
     const uniqueDomains = Array.from(new Set(allDomains)).slice(0, count * 2);
+    console.log(`[去重] 原始域名总数：${allDomains.length} | 去重后候选：${uniqueDomains.length} | 目标数量：${count}`);
     updateJob(jobId, { progress: 40, message: `找到 ${uniqueDomains.length} 个候选，开始AI评估...` });
 
     interface SupplierResult {
@@ -245,8 +258,12 @@ async function runSupplyChainJob(
     const suppliers: SupplierResult[] = [];
     const batchSize = 5;
 
+    if (uniqueDomains.length === 0) {
+      console.log(`[LLM分析] 跳过：没有候选域名可分析，直接输出0家`);
+    }
     for (let i = 0; i < Math.min(uniqueDomains.length, count * 2); i += batchSize) {
       const batch = uniqueDomains.slice(i, i + batchSize);
+      console.log(`[LLM分析批次${Math.floor(i/batchSize)+1}] 分析域名：${JSON.stringify(batch)}`);
       await Promise.allSettled(
         batch.map(async (domain) => {
           const analysis = await llmParseJSON<SupplierResult>(
@@ -265,6 +282,7 @@ async function runSupplyChainJob(
               commercialScore: 50, overallScore: 50, summary: "Pending", certifications: [],
               minOrderQty: "TBD", leadTime: "TBD" }
           );
+          console.log(`[LLM分析] 域名：${domain} | generatedBy：${analysis.generatedBy} | overallScore：${analysis.overallScore} | companyName：${analysis.companyName}`);
           suppliers.push(analysis);
         })
       );
@@ -277,6 +295,7 @@ async function runSupplyChainJob(
 
     suppliers.sort((a, b) => b.overallScore - a.overallScore);
     const final = suppliers.slice(0, count);
+    console.log(`[最终输出] 分析总数：${suppliers.length} | 输出数量：${final.length} | 分数分布：${final.map(s=>s.overallScore).join(", ")}`);
 
     updateJob(jobId, {
       status: "completed",
