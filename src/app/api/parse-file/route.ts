@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { analyzeProduct } from "@/services/productAnalyzer";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();

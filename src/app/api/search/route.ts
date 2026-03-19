@@ -8,6 +8,8 @@ import { prisma } from "@/lib/db";
 import { analyzeProduct } from "@/services/productAnalyzer";
 import { z } from "zod";
 
+export const dynamic = "force-dynamic";
+
 const SearchRequestSchema = z.object({
   productName: z.string().min(2),
   productDescription: z.string().optional().default(""),

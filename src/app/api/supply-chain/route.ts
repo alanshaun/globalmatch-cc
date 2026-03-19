@@ -8,6 +8,8 @@ import { searchViaSerpAPI } from "@/scrapers/serpapi";
 import { searchViaDDG } from "@/scrapers/ddg";
 import { COUNTRY_SEARCH_TERMS } from "@/lib/constants";
 
+export const dynamic = "force-dynamic";
+
 interface SupplierResult {
   companyName: string;
   website: string;

@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { llmParseJSON } from "@/lib/llmClient";
 
+export const dynamic = "force-dynamic";
+
 interface ProductRecommendation {
   category: string;
   hsCode: string;

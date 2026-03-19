@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { llmParseJSON } from "@/lib/llmClient";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
     const { productCategory, targetCountries, existingCertifications } = await req.json();

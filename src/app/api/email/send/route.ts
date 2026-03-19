@@ -7,6 +7,8 @@ import { prisma } from "@/lib/db";
 import { Resend } from "resend";
 import { v4 as uuidv4 } from "uuid";
 
+export const dynamic = "force-dynamic";
+
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req: NextRequest) {

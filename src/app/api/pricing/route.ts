@@ -7,6 +7,8 @@ import { llmParseJSON } from "@/lib/llmClient";
 import { searchViaSerpAPI } from "@/scrapers/serpapi";
 import { COUNTRY_SEARCH_TERMS } from "@/lib/constants";
 
+export const dynamic = "force-dynamic";
+
 export async function POST(req: NextRequest) {
   try {
     const { productName, myPrice, market } = await req.json();
