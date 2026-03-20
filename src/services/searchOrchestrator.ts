@@ -1,11 +1,12 @@
 /**
- * Search Orchestrator - 7-layer fallback system
- * L1: ImportYeti → L2: SerpAPI → L3: DDG → L4: Bing → L5: Cache
+ * Search Orchestrator - 5-layer fallback system (V1.0 MVP)
+ * [REMOVED L1: ImportYeti — 极易因HTML变动崩溃，Phase 2 用 SearXNG 替代]
+ * L2: SerpAPI → L3: DDG → L4: Bing → L5: Cache
  * Never returns empty, never shows "search failed"
  */
 
 import { prisma } from "@/lib/db";
-import { scrapeImportYetiMultiCountry } from "@/scrapers/importyeti";
+// [V1.0 REMOVED] import { scrapeImportYetiMultiCountry } from "@/scrapers/importyeti";
 import { searchViaSerpAPI } from "@/scrapers/serpapi";
 import { searchViaDDG } from "@/scrapers/ddg";
 import { searchViaBing } from "@/scrapers/bing";
@@ -70,7 +71,7 @@ export interface BuyerResult {
 }
 
 interface AuditLog {
-  l1_importyeti?: number;
+  // l1_importyeti removed in V1.0 MVP
   l2_serpapi?: number;
   l3_ddg?: number;
   l4_bing?: number;
@@ -205,30 +206,11 @@ export async function runBuyerSearch(
   const cachedResults = await getFromCache(cacheKey);
   audit.l5_cache = cachedResults.length;
 
-  // L1: ImportYeti (primary)
-  onProgress({ type: "progress", message: "正在检索全球贸易数据库...", foundCount: 0, progress: 15 });
-  const importYetiResults = await scrapeImportYetiMultiCountry(
-    profile.searchKeywords.slice(0, 3),
-    targetCountries
-  ).catch(() => []);
-  audit.l1_importyeti = importYetiResults.length;
-
-  for (const r of importYetiResults) {
-    if (r.domain) {
-      allCandidates.push({
-        domain: r.domain,
-        companyName: r.companyName,
-        website: r.website || `https://${r.domain}`,
-        country: r.country,
-        source: "customs",
-        shipmentCount: r.shipmentCount,
-        lastShipment: r.lastShipment,
-      });
-    }
-  }
+  // [V1.0 REMOVED] L1: ImportYeti — 依赖HTML结构解析，易崩溃
+  // Phase 2 将用 SearXNG 替代
 
   // L2: SerpAPI + L3: DDG + L4: Bing (concurrent)
-  onProgress({ type: "progress", message: "正在检索全球买家数据...", foundCount: 0, progress: 25 });
+  onProgress({ type: "progress", message: "正在检索全球买家数据...", foundCount: 0, progress: 20 });
 
   const queries = buildSearchQueries(profile, targetCountries);
   const [serpResults, ddgResults, bingResults] = await Promise.allSettled([

@@ -69,25 +69,9 @@ async function researchCompetitors(
   try {
     const snippets: string[] = [];
 
-    // Web search: ImportYeti public supplier page
-    const importYetiUrl = `https://www.importyeti.com/company/${encodeURIComponent(domain.replace(/\./g, "-"))}`;
-    try {
-      const res = await fetch(importYetiUrl, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
-        },
-        signal: AbortSignal.timeout(8000),
-      });
-      if (res.ok) {
-        const html = await res.text();
-        // Extract supplier names from HTML (simple regex for company names in import records)
-        const supplierMatches = html.match(/shipper[^"]*"([A-Z][A-Z\s&.,]{4,50})"/gi) ?? [];
-        snippets.push(...supplierMatches.slice(0, 10).map((m) => `Shipper found: ${m}`));
-      }
-    } catch {
-      // skip
-    }
+    // [V1.0 REMOVED] ImportYeti company page fetch — 依赖HTML结构，易崩溃
+    // Phase 2 将用 SearXNG 替代
+    // const importYetiUrl = `https://www.importyeti.com/company/...`;
 
     // Google News: search for "[company] supplier" or "[company] manufacturer"
     const productKw = productKeywords.slice(0, 2).join(" ");
