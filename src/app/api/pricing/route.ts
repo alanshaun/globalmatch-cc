@@ -1,33 +1,18 @@
 /**
  * POST /api/pricing - Price intelligence
+ *
+ * V2.0: Removed SerpAPI dependency — pure LLM analysis.
+ * Page is hidden in V1.0 MVP; API kept for future use.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { llmParseJSON } from "@/lib/llmClient";
-import { searchViaSerpAPI } from "@/scrapers/serpapi";
-import { COUNTRY_SEARCH_TERMS } from "@/lib/constants";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
     const { productName, myPrice, market } = await req.json();
-
-    // Search for price data
-    const priceQueries = [
-      `${productName} wholesale price B2B`,
-      `${productName} import price ${market}`,
-      `${productName} FOB price manufacturer`,
-    ];
-
-    const serpResults = await searchViaSerpAPI(
-      productName,
-      priceQueries,
-      [market],
-      COUNTRY_SEARCH_TERMS
-    ).catch(() => []);
-
-    const snippets = serpResults.slice(0, 10).map((r) => r.snippet).join("\n");
 
     const result = await llmParseJSON<{
       marketMin: number;
@@ -41,10 +26,6 @@ export async function POST(req: NextRequest) {
       myPriceAssessment: string;
     }>(
       `You are a B2B pricing consultant. Analyze market pricing for "${productName}" in ${market}.
-
-Search data context:
-${snippets}
-
 My current price: ${myPrice || "Not specified"}
 
 Return ONLY this JSON:
@@ -54,7 +35,7 @@ Return ONLY this JSON:
   "marketMedian": median market price number,
   "trend": "up|down|stable",
   "trendReason": "brief reason for trend",
-  "distribution": [5 percentage values summing to 100 representing price range distribution],
+  "distribution": [5 percentage values summing to 100],
   "strategies": ["3 specific pricing strategy recommendations"],
   "positioning": "high|premium|mid|budget|low",
   "myPriceAssessment": "assessment of my price vs market"
@@ -70,7 +51,7 @@ Return ONLY this JSON:
         strategies: [
           "Position at market median for initial market entry",
           "Offer volume discounts for orders above MOQ",
-          "Consider FOB vs CIF pricing transparency"
+          "Consider FOB vs CIF pricing transparency",
         ],
         positioning: "mid",
         myPriceAssessment: "Price comparison analysis unavailable",

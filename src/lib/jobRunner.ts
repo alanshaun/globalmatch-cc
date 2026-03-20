@@ -7,8 +7,7 @@
 import { updateJob } from "./jobStore";
 import { prisma } from "./db";
 import { llmParseJSON } from "./llmClient";
-import { searchViaSerpAPI } from "@/scrapers/serpapi";
-import { searchViaDDG } from "@/scrapers/ddg";
+import { searchViaSearXNG, buildSupplierQueries } from "@/scrapers/searxng";
 import { COUNTRY_SEARCH_TERMS } from "./constants";
 import { analyzeProduct } from "@/services/productAnalyzer";
 import { runBuyerSearch } from "@/services/searchOrchestrator";
@@ -222,26 +221,22 @@ async function runSupplyChainJob(
     updateJob(jobId, { progress: 25, message: "正在全网搜索供应商..." });
 
     const regionTerm = COUNTRY_SEARCH_TERMS[input.region] || "China";
-    const fullQueries = safeQueries.map((q) => `${q} ${regionTerm} manufacturer`);
-    console.log(`[搜索构建] region：${input.region} | regionTerm：${regionTerm} | fullQueries：${JSON.stringify(fullQueries.slice(0, 3))}`);
-
-    const [serpResults, ddgResults] = await Promise.allSettled([
-      searchViaSerpAPI(input.need, safeQueries, [input.region], COUNTRY_SEARCH_TERMS),
-      searchViaDDG(fullQueries.slice(0, 3)),
-    ]);
+    // Build supplier-oriented queries (manufacturer / factory / OEM)
+    const supplierQueries: string[] = [];
+    for (const kw of safeQueries.slice(0, 3)) {
+      supplierQueries.push(...buildSupplierQueries(kw, regionTerm));
+    }
+    console.log(`[搜索构建] region：${input.region} | regionTerm：${regionTerm} | queries：${JSON.stringify(supplierQueries.slice(0, 3))}`);
 
     const allDomains: string[] = [];
-    if (serpResults.status === "fulfilled") {
-      console.log(`[SerpAPI] 状态：成功 | 获取原始结果：${serpResults.value.length} 条 | 示例域名：${serpResults.value.slice(0,3).map(r=>r.domain).join(", ") || "无"}`);
-      allDomains.push(...serpResults.value.map((r) => r.domain));
-    } else {
-      console.log(`[SerpAPI] 状态：失败 | 原因：${serpResults.reason}`);
-    }
-    if (ddgResults.status === "fulfilled") {
-      console.log(`[DDG搜索] 状态：成功 | 获取原始结果：${ddgResults.value.length} 条 | 示例域名：${ddgResults.value.slice(0,3).map(r=>r.domain).join(", ") || "无"}`);
-      allDomains.push(...ddgResults.value.map((r) => r.domain));
-    } else {
-      console.log(`[DDG搜索] 状态：失败 | 原因：${ddgResults.reason}`);
+    try {
+      const searxResults = await searchViaSearXNG(supplierQueries.slice(0, 10), true);
+      console.log(`[SearXNG] 状态：成功 | 获取原始结果：${searxResults.length} 条 | 示例域名：${searxResults.slice(0,3).map(r=>r.domain).join(", ") || "无"}`);
+      allDomains.push(...searxResults.map((r) => r.domain));
+    } catch (err) {
+      console.error(`[SearXNG] 状态：失败 | 原因：${err instanceof Error ? err.message : err}`);
+      // Propagate to outer catch — zero silent failures
+      throw err;
     }
 
     const uniqueDomains = Array.from(new Set(allDomains)).slice(0, count * 2);

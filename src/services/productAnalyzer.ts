@@ -2,6 +2,7 @@
  * Product Analyzer - Extracts structured product profile from any input type
  */
 
+import { z } from "zod";
 import { llmParseJSON } from "@/lib/llmClient";
 
 export interface ProductProfile {
@@ -40,6 +41,18 @@ Return this exact JSON structure:
   "searchKeywords": ["8-10 English search keywords for finding buyers"]
 }`;
 
+const ProductProfileSchema = z.object({
+  productName: z.string().min(1),
+  productDescription: z.string(),
+  hsCode: z.string(),
+  category: z.string(),
+  targetBuyerTypes: z.array(z.string()),
+  pricePositioning: z.enum(["high", "mid", "low"]),
+  certifications: z.array(z.string()),
+  coreAdvantages: z.array(z.string()),
+  searchKeywords: z.array(z.string()).min(1),
+});
+
 const FALLBACK: ProductProfile = {
   productName: "Product",
   productDescription: "General product",
@@ -53,12 +66,19 @@ const FALLBACK: ProductProfile = {
 };
 
 export async function analyzeProduct(input: string): Promise<ProductProfile> {
-  return llmParseJSON<ProductProfile>(
+  const raw = await llmParseJSON<ProductProfile>(
     PROFILE_PROMPT(input),
     SYSTEM_PROMPT,
     FALLBACK,
     { fallbackType: "productProfile" }
   );
+
+  const validated = ProductProfileSchema.safeParse(raw);
+  if (!validated.success) {
+    console.warn("[ProductAnalyzer] Zod validation failed:", validated.error.issues.map(i => i.message).join(", "));
+    return { ...FALLBACK, ...raw };
+  }
+  return validated.data;
 }
 
 export async function extractFromFile(

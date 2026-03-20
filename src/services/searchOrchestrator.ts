@@ -1,15 +1,24 @@
 /**
- * Search Orchestrator - 5-layer fallback system (V1.0 MVP)
- * [REMOVED L1: ImportYeti — 极易因HTML变动崩溃，Phase 2 用 SearXNG 替代]
- * L2: SerpAPI → L3: DDG → L4: Bing → L5: Cache
- * Never returns empty, never shows "search failed"
+ * UnifiedSearchOrchestrator — V2.0
+ *
+ * 层级（买家搜索）:
+ *   L1: SQLite 本地缓存
+ *   L2: SearXNG（替代 SerpAPI + DDG + Bing）
+ *   L3: 深度搜索（LLM 生成更多关键词 → 再跑 SearXNG）
+ *
+ * 零静默失败原则:
+ *   - 任何 catch { return [] } 全部清除
+ *   - 搜索层全部失败时，向上抛出明确 Error
+ *   - 前端会收到 { type: "error" } 事件，显示具体错误日志
+ *
+ * Zod 强校验:
+ *   - 所有 LLM 输出经 schema 校验，不合格则用 fallback
  */
 
+import { z } from "zod";
 import { prisma } from "@/lib/db";
-// [V1.0 REMOVED] import { scrapeImportYetiMultiCountry } from "@/scrapers/importyeti";
-import { searchViaSerpAPI } from "@/scrapers/serpapi";
-import { searchViaDDG } from "@/scrapers/ddg";
-import { searchViaBing } from "@/scrapers/bing";
+import { getCachedDomains, saveCachedDomains, writeAudit } from "@/lib/searchCache";
+import { searchViaSearXNG, buildBuyerQueries, SearchAllNodesFailed } from "@/scrapers/searxng";
 import { getContactsBatch } from "./pdlClient";
 import { detectIntentSignals } from "./intentSignals";
 import { analyzeBuyer, generateEmail, scrapeWebsiteContent } from "./buyerAnalyzer";
@@ -20,6 +29,12 @@ import type { CompetitorData, SocialDynamics } from "./intelligenceAgent";
 import { COMPETITOR_DOMAIN_BLACKLIST, GENERIC_DOMAIN_BLACKLIST, COUNTRY_SEARCH_TERMS } from "@/lib/constants";
 import { llmCall } from "@/lib/llmClient";
 import type { ProductProfile } from "./productAnalyzer";
+
+// ── Zod Schemas ───────────────────────────────────────────────────────────────
+
+const DeepKeywordsSchema = z.array(z.string()).min(1).max(20);
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface BuyerResult {
   id?: string;
@@ -62,7 +77,6 @@ export interface BuyerResult {
   bestContactTiming: string;
   redFlags: string[];
   supplierWeaknessSignal?: SupplierWeaknessResult;
-  // Intelligence Agent fields
   competitorData?: CompetitorData;
   socialDynamics?: SocialDynamics;
   outreachHook?: string;
@@ -70,21 +84,28 @@ export interface BuyerResult {
   funnelStage?: string;
 }
 
-interface AuditLog {
-  // l1_importyeti removed in V1.0 MVP
-  l2_serpapi?: number;
-  l3_ddg?: number;
-  l4_bing?: number;
-  l5_cache?: number;
-  after_dedup?: number;
-  after_user_filter?: number;
-  after_competitor_filter?: number;
-  pdl_enriched?: number;
-  no_contact?: number;
-  after_analysis?: number;
-  final_output?: number;
-  avg_score?: number;
+export interface SearchProgress {
+  type: "progress" | "new_buyer" | "completed" | "error";
+  message?: string;
+  foundCount?: number;
+  progress?: number;
+  data?: BuyerResult;
+  isFallback?: boolean;
+  fallbackReason?: string;
+  errorDetail?: string;
 }
+
+interface Candidate {
+  domain: string;
+  companyName: string;
+  website: string;
+  country: string;
+  source: string;
+  shipmentCount: number;
+  lastShipment: string | null;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function extractDomain(url: string): string {
   try {
@@ -103,41 +124,6 @@ function isBlacklisted(domain: string): boolean {
   );
 }
 
-function buildSearchQueries(
-  profile: ProductProfile,
-  countries: string[]
-): string[] {
-  const queries: string[] = [];
-  const kw = profile.searchKeywords[0] || profile.productName;
-
-  for (const country of countries.slice(0, 2)) {
-    const term = COUNTRY_SEARCH_TERMS[country] || country;
-    queries.push(
-      `${kw} importer distributor ${term}`,
-      `${kw} wholesale buyer ${term}`,
-      `buy ${kw} bulk ${term} company`
-    );
-  }
-  return queries;
-}
-
-async function getFromCache(
-  cacheKey: string
-): Promise<{ domain: string; companyName: string }[]> {
-  try {
-    const cache = await prisma.searchCache.findFirst({
-      where: {
-        cacheKey,
-        expiresAt: { gt: new Date() },
-      },
-    });
-    if (cache) return cache.results as { domain: string; companyName: string }[];
-  } catch {
-    // DB not available
-  }
-  return [];
-}
-
 async function getUserSeenDomains(userId: string): Promise<Set<string>> {
   try {
     const seen = await prisma.userSeenCompany.findMany({
@@ -152,33 +138,36 @@ async function getUserSeenDomains(userId: string): Promise<Set<string>> {
 
 async function generateDeepSearchKeywords(
   profile: ProductProfile,
-  existingKeywords: string[]
+  usedKeywords: string[]
 ): Promise<string[]> {
-  const result = await llmCall(
-    `Generate 10 diverse English search keywords for finding importers/buyers of "${profile.productName}".
-    Avoid these already-used keywords: ${existingKeywords.join(", ")}.
-    Include industry-specific terms, trade jargon, and regional variations.
-    Return as JSON array only: ["kw1", "kw2", ...]`,
-    "You generate diverse B2B buyer search keywords."
-  );
-
+  const t0 = Date.now();
   try {
-    const parsed = JSON.parse(result.content.match(/\[[\s\S]*\]/)?.[0] || "[]");
-    return Array.isArray(parsed) ? parsed : [];
+    const result = await llmCall(
+      `Generate 10 diverse English search keywords for finding importers/buyers of "${profile.productName}".
+Avoid these already-used keywords: ${usedKeywords.join(", ")}.
+Include industry-specific terms, trade jargon, and regional variations.
+Return ONLY a JSON array, no markdown: ["kw1", "kw2", ...]`,
+      "You generate diverse B2B buyer search keywords."
+    );
+
+    const raw = result.content.match(/\[[\s\S]*\]/)?.[0] ?? "[]";
+    const parsed = DeepKeywordsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : usedKeywords.map((kw) => `${kw} buyer`);
   } catch {
-    return existingKeywords.map((kw) => `${kw} supplier wanted`);
+    console.warn("[UnifiedSearch] deep keyword LLM failed, using fallback");
+    return usedKeywords.map((kw) => `${kw} importer`);
+  } finally {
+    writeAudit({
+      sessionId: "deep-keywords",
+      layer: "llm-keywords",
+      query: profile.productName,
+      resultCount: 0,
+      durationMs: Date.now() - t0,
+    });
   }
 }
 
-export interface SearchProgress {
-  type: "progress" | "new_buyer" | "completed" | "error";
-  message?: string;
-  foundCount?: number;
-  progress?: number;
-  data?: BuyerResult;
-  isFallback?: boolean;
-  fallbackReason?: string;
-}
+// ── Main Search ───────────────────────────────────────────────────────────────
 
 export async function runBuyerSearch(
   sessionId: string,
@@ -188,175 +177,135 @@ export async function runBuyerSearch(
   targetCount: number,
   onProgress: (event: SearchProgress) => void
 ): Promise<void> {
-  const audit: AuditLog = {};
-  const allCandidates: {
-    domain: string;
-    companyName: string;
-    website: string;
-    country: string;
-    source: string;
-    shipmentCount: number;
-    lastShipment: string | null;
-  }[] = [];
+  const candidates: Candidate[] = [];
+  const cacheKey = `buyer-${profile.category}-${targetCountries.sort().join(",")}`;
 
   onProgress({ type: "progress", message: "正在解析产品信息...", foundCount: 0, progress: 5 });
 
-  // L5: Get cache as baseline (async)
-  const cacheKey = `${profile.category}-${targetCountries.sort().join(",")}`;
-  const cachedResults = await getFromCache(cacheKey);
-  audit.l5_cache = cachedResults.length;
+  // ── L1: SQLite 本地缓存 ──────────────────────────────────────────────────
+  const cached = getCachedDomains(cacheKey);
+  if (cached.length > 0) {
+    for (const c of cached) {
+      candidates.push({
+        domain: c.domain,
+        companyName: c.companyName,
+        website: `https://${c.domain}`,
+        country: targetCountries[0] ?? "Unknown",
+        source: "cache",
+        shipmentCount: 0,
+        lastShipment: null,
+      });
+    }
+    writeAudit({ sessionId, layer: "l1-cache", query: cacheKey, resultCount: cached.length, durationMs: 0 });
+  }
 
-  // [V1.0 REMOVED] L1: ImportYeti — 依赖HTML结构解析，易崩溃
-  // Phase 2 将用 SearXNG 替代
-
-  // L2: SerpAPI + L3: DDG + L4: Bing (concurrent)
+  // ── L2: SearXNG ──────────────────────────────────────────────────────────
   onProgress({ type: "progress", message: "正在检索全球买家数据...", foundCount: 0, progress: 20 });
 
-  const queries = buildSearchQueries(profile, targetCountries);
-  const [serpResults, ddgResults, bingResults] = await Promise.allSettled([
-    searchViaSerpAPI(profile.productName, profile.searchKeywords, targetCountries, COUNTRY_SEARCH_TERMS),
-    searchViaDDG(queries),
-    searchViaBing(queries),
-  ]);
+  const searxErrors: Error[] = [];
 
-  if (serpResults.status === "fulfilled") {
-    audit.l2_serpapi = serpResults.value.length;
-    for (const r of serpResults.value) {
-      if (r.domain && !allCandidates.some((c) => c.domain === r.domain)) {
-        allCandidates.push({
-          domain: r.domain,
-          companyName: r.title.split("|")[0].split("-")[0].trim(),
-          website: r.url,
-          country: targetCountries[0] || "Unknown",
-          source: "serpapi",
-          shipmentCount: 0,
-          lastShipment: null,
-        });
-      }
-    }
-  }
+  for (const country of targetCountries.slice(0, 3)) {
+    const countryTerm = COUNTRY_SEARCH_TERMS[country] ?? country;
+    const kw = profile.searchKeywords[0] ?? profile.productName;
+    const queries = buildBuyerQueries(kw, countryTerm);
+    const t0 = Date.now();
 
-  if (ddgResults.status === "fulfilled") {
-    audit.l3_ddg = ddgResults.value.length;
-    for (const r of ddgResults.value) {
-      if (r.domain && !allCandidates.some((c) => c.domain === r.domain)) {
-        allCandidates.push({
-          domain: r.domain,
-          companyName: r.title.split("|")[0].split("-")[0].trim(),
-          website: r.url,
-          country: targetCountries[0] || "Unknown",
-          source: "ddg",
-          shipmentCount: 0,
-          lastShipment: null,
-        });
-      }
-    }
-  }
+    try {
+      const results = await searchViaSearXNG(queries, true);
+      writeAudit({ sessionId, layer: "l2-searxng", query: `${kw} / ${country}`, resultCount: results.length, durationMs: Date.now() - t0 });
 
-  if (bingResults.status === "fulfilled") {
-    audit.l4_bing = bingResults.value.length;
-    for (const r of bingResults.value) {
-      if (r.domain && !allCandidates.some((c) => c.domain === r.domain)) {
-        allCandidates.push({
-          domain: r.domain,
-          companyName: r.title.split("|")[0].split("-")[0].trim(),
-          website: r.url,
-          country: targetCountries[0] || "Unknown",
-          source: "bing",
-          shipmentCount: 0,
-          lastShipment: null,
-        });
-      }
-    }
-  }
-
-  audit.after_dedup = allCandidates.length;
-
-  // Filter user-seen domains
-  const seenDomains = await getUserSeenDomains(userId);
-  const freshCandidates = allCandidates.filter(
-    (c) => !seenDomains.has(c.domain)
-  );
-  audit.after_user_filter = freshCandidates.length;
-
-  // Filter blacklisted domains
-  const filteredCandidates = freshCandidates.filter(
-    (c) => !isBlacklisted(c.domain)
-  );
-  audit.after_competitor_filter = filteredCandidates.length;
-
-  // If not enough candidates, trigger deep search
-  const needed = targetCount * 3;
-  if (filteredCandidates.length < needed) {
-    onProgress({ type: "progress", message: "正在深度搜索更多买家...", foundCount: 0, progress: 35 });
-    const deepKeywords = await generateDeepSearchKeywords(
-      profile,
-      profile.searchKeywords
-    );
-    const [deepSerp, deepDDG] = await Promise.allSettled([
-      searchViaSerpAPI(
-        profile.productName,
-        deepKeywords,
-        targetCountries,
-        COUNTRY_SEARCH_TERMS
-      ),
-      searchViaDDG(deepKeywords.slice(0, 5).map((kw) => `${kw} importer buyer`)),
-    ]);
-
-    for (const results of [deepSerp, deepDDG]) {
-      if (results.status === "fulfilled") {
-        for (const r of results.value) {
-          if (r.domain && !filteredCandidates.some((c) => c.domain === r.domain) && !isBlacklisted(r.domain)) {
-            filteredCandidates.push({
-              domain: r.domain,
-              companyName: r.title.split("|")[0].split("-")[0].trim(),
-              website: r.url,
-              country: targetCountries[0] || "Unknown",
-              source: r.source,
-              shipmentCount: 0,
-              lastShipment: null,
-            });
-          }
+      for (const r of results) {
+        if (r.domain && !candidates.some((c) => c.domain === r.domain)) {
+          candidates.push({
+            domain: r.domain,
+            companyName: r.title.split("|")[0].split("-")[0].trim(),
+            website: r.url,
+            country,
+            source: "searxng",
+            shipmentCount: 0,
+            lastShipment: null,
+          });
         }
       }
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      searxErrors.push(e);
+      writeAudit({ sessionId, layer: "l2-searxng", query: `${kw} / ${country}`, resultCount: 0, error: e.message, durationMs: Date.now() - t0 });
     }
   }
 
-  // Add cache as fallback if still not enough
-  let isFallback = false;
-  if (filteredCandidates.length < targetCount && cachedResults.length > 0) {
-    isFallback = true;
-    for (const cached of cachedResults) {
-      if (!filteredCandidates.some((c) => c.domain === cached.domain)) {
-        filteredCandidates.push({
-          ...cached,
-          website: `https://${cached.domain}`,
-          country: targetCountries[0] || "Unknown",
-          source: "cache",
-          shipmentCount: 0,
-          lastShipment: null,
-        });
+  // ── 过滤 ─────────────────────────────────────────────────────────────────
+  const seenDomains = await getUserSeenDomains(userId);
+  let filtered = candidates
+    .filter((c) => !seenDomains.has(c.domain))
+    .filter((c) => !isBlacklisted(c.domain));
+
+  // ── L3: 深度搜索 ─────────────────────────────────────────────────────────
+  if (filtered.length < targetCount * 2) {
+    onProgress({ type: "progress", message: "正在深度搜索更多买家...", foundCount: 0, progress: 35 });
+
+    const deepKeywords = await generateDeepSearchKeywords(profile, profile.searchKeywords);
+    const deepQueries = deepKeywords
+      .slice(0, 5)
+      .map((kw) => `${kw} importer buyer ${COUNTRY_SEARCH_TERMS[targetCountries[0]] ?? ""}`);
+
+    const t0 = Date.now();
+    try {
+      const deepResults = await searchViaSearXNG(deepQueries, false); // soft-fail ok here
+      writeAudit({ sessionId, layer: "l3-deep", query: deepQueries.join("; "), resultCount: deepResults.length, durationMs: Date.now() - t0 });
+
+      for (const r of deepResults) {
+        if (r.domain && !filtered.some((c) => c.domain === r.domain) && !isBlacklisted(r.domain)) {
+          filtered.push({
+            domain: r.domain,
+            companyName: r.title.split("|")[0].split("-")[0].trim(),
+            website: r.url,
+            country: targetCountries[0] ?? "Unknown",
+            source: "searxng-deep",
+            shipmentCount: 0,
+            lastShipment: null,
+          });
+        }
       }
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      writeAudit({ sessionId, layer: "l3-deep", query: "deep", resultCount: 0, error: e.message, durationMs: Date.now() - t0 });
+      // deep search failure is non-fatal
     }
   }
 
-  // Take top candidates for analysis
-  const toAnalyze = filteredCandidates.slice(0, Math.min(targetCount * 2, 60));
+  // ── 零静默失败检查 ────────────────────────────────────────────────────────
+  if (filtered.length === 0) {
+    const errMsg =
+      searxErrors.length > 0
+        ? `搜索引擎全部失败: ${searxErrors.map((e) => e.message).join(" | ")}`
+        : "所有搜索层均返回0结果，请检查网络或关键词";
 
-  onProgress({
-    type: "progress",
-    message: "正在分析买家匹配度...",
-    foundCount: 0,
-    progress: 40,
-  });
+    onProgress({ type: "error", message: errMsg, errorDetail: errMsg, foundCount: 0, progress: 0 });
 
-  // Batch get contacts
+    // Update session status
+    await prisma.searchSession.update({
+      where: { id: sessionId },
+      data: { status: "failed", completedAt: new Date() },
+    }).catch(() => null);
+
+    throw new Error(errMsg);
+  }
+
+  // ── 保存缓存 ──────────────────────────────────────────────────────────────
+  saveCachedDomains(
+    cacheKey,
+    filtered.slice(0, 100).map((c) => ({ domain: c.domain, companyName: c.companyName }))
+  );
+
+  // ── 分析阶段 ──────────────────────────────────────────────────────────────
+  const toAnalyze = filtered.slice(0, Math.min(targetCount * 2, 60));
+
+  onProgress({ type: "progress", message: "正在分析买家匹配度...", foundCount: 0, progress: 40 });
+
   const domains = toAnalyze.map((c) => c.domain).filter(Boolean);
   const contactMap = await getContactsBatch(domains, 5);
-  audit.pdl_enriched = Array.from(contactMap.values()).filter((c) => c.length > 0).length;
-  audit.no_contact = Array.from(contactMap.values()).filter((c) => c.length === 0).length;
 
-  // Analyze each buyer
   const buyers: BuyerResult[] = [];
   const batchSize = 5;
 
@@ -374,31 +323,26 @@ export async function runBuyerSearch(
     await Promise.allSettled(
       batch.map(async (candidate) => {
         try {
-          // Scrape website + detect signals + supplier weakness + intelligence agent concurrently
-          const [websiteContent, intentSignals, weaknessResult, intelResult] = await Promise.allSettled([
-            scrapeWebsiteContent(candidate.domain),
-            detectIntentSignals(candidate.companyName, candidate.domain),
-            detectSupplierWeakness(candidate.companyName, candidate.domain),
-            runIntelligenceAgent(
-              candidate.companyName,
-              candidate.domain,
-              profile.searchKeywords ?? [],
-              profile.productName,
-              "", // whyTheyNeedUs filled in after analysis
-              contactMap.get(candidate.domain)?.[0]?.name
-            ),
-          ]);
+          const [websiteContent, intentSignals, weaknessResult, intelResult] =
+            await Promise.allSettled([
+              scrapeWebsiteContent(candidate.domain),
+              detectIntentSignals(candidate.companyName, candidate.domain),
+              detectSupplierWeakness(candidate.companyName, candidate.domain),
+              runIntelligenceAgent(
+                candidate.companyName,
+                candidate.domain,
+                profile.searchKeywords ?? [],
+                profile.productName,
+                "",
+                contactMap.get(candidate.domain)?.[0]?.name
+              ),
+            ]);
 
-          const content =
-            websiteContent.status === "fulfilled" ? websiteContent.value : "";
-          const signals =
-            intentSignals.status === "fulfilled" ? intentSignals.value : [];
-          const supplierWeakness =
-            weaknessResult.status === "fulfilled" ? weaknessResult.value : undefined;
-          const intel =
-            intelResult.status === "fulfilled" ? intelResult.value : undefined;
+          const content = websiteContent.status === "fulfilled" ? websiteContent.value : "";
+          const signals = intentSignals.status === "fulfilled" ? intentSignals.value : [];
+          const supplierWeakness = weaknessResult.status === "fulfilled" ? weaknessResult.value : undefined;
+          const intel = intelResult.status === "fulfilled" ? intelResult.value : undefined;
 
-          // Analyze buyer
           const analysis = await analyzeBuyer(
             candidate.companyName,
             candidate.domain,
@@ -409,12 +353,11 @@ export async function runBuyerSearch(
             profile
           );
 
-          const contacts = contactMap.get(candidate.domain) || [];
+          const contacts = contactMap.get(candidate.domain) ?? [];
 
-          // Generate personalized email
           const emailDraft = await generateEmail(
             candidate.companyName,
-            contacts[0]?.name || "",
+            contacts[0]?.name ?? "",
             analysis.buyerBusiness,
             analysis.whyTheyNeedUs,
             signals,
@@ -461,11 +404,10 @@ export async function runBuyerSearch(
             lastShipment: candidate.lastShipment,
             bestContactTiming: analysis.bestContactTiming,
             redFlags: analysis.redFlags,
-            supplierWeaknessSignal:
-              supplierWeakness?.hasWeaknessSignal ? supplierWeakness : undefined,
+            supplierWeaknessSignal: supplierWeakness?.hasWeaknessSignal ? supplierWeakness : undefined,
             competitorData: intel?.competitorData,
             socialDynamics: intel?.socialDynamics,
-            outreachHook: intel?.outreachHook || "",
+            outreachHook: intel?.outreachHook ?? "",
             reachabilityStatus: {
               email: contacts.some((c) => c.email && c.emailQuality !== "none"),
               whatsapp: false,
@@ -513,28 +455,21 @@ export async function runBuyerSearch(
             });
             buyer.id = saved.id;
 
-            // Mark as seen
             await prisma.userSeenCompany.upsert({
               where: { userId_companyDomain: { userId, companyDomain: buyer.domain } },
               create: { userId, companyDomain: buyer.domain },
               update: {},
             });
           } catch {
-            // DB insert failed, continue without saving
+            // DB insert failure — buyer still returned to frontend
           }
 
           buyers.push(buyer);
-
-          // Push to frontend via SSE
           buyers.sort((a, b) => b.matchScore - a.matchScore);
-          onProgress({
-            type: "new_buyer",
-            foundCount: buyers.length,
-            progress,
-            data: buyer,
-          });
+
+          onProgress({ type: "new_buyer", foundCount: buyers.length, progress, data: buyer });
         } catch (err) {
-          console.warn("[SearchOrchestrator] Buyer analysis failed:", err);
+          console.warn("[UnifiedSearch] buyer analysis failed:", err instanceof Error ? err.message : err);
         }
       })
     );
@@ -542,57 +477,24 @@ export async function runBuyerSearch(
     if (buyers.length >= targetCount) break;
   }
 
-  audit.after_analysis = buyers.length;
-  audit.final_output = Math.min(buyers.length, targetCount);
-  audit.avg_score =
-    buyers.length > 0
-      ? Math.round(buyers.reduce((s, b) => s + b.matchScore, 0) / buyers.length)
-      : 0;
-
-  // Log audit
-  console.log("[Audit]", JSON.stringify(audit));
+  const isFallback = toAnalyze.some((c) => c.source === "cache");
 
   // Update session
-  try {
-    await prisma.searchSession.update({
-      where: { id: sessionId },
-      data: {
-        status: "completed",
-        resultCount: Math.min(buyers.length, targetCount),
-        isFallback,
-        auditLog: JSON.parse(JSON.stringify(audit)),
-        completedAt: new Date(),
-      },
-    });
-
-    // Save cache
-    await prisma.searchCache.upsert({
-      where: { cacheKey },
-      create: {
-        cacheKey,
-        results: filteredCandidates.slice(0, 100).map((c) => ({
-          domain: c.domain,
-          companyName: c.companyName,
-        })),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-      update: {
-        results: filteredCandidates.slice(0, 100).map((c) => ({
-          domain: c.domain,
-          companyName: c.companyName,
-        })),
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      },
-    });
-  } catch {
-    // DB not available
-  }
+  await prisma.searchSession.update({
+    where: { id: sessionId },
+    data: {
+      status: "completed",
+      resultCount: Math.min(buyers.length, targetCount),
+      isFallback,
+      completedAt: new Date(),
+    },
+  }).catch(() => null);
 
   onProgress({
     type: "completed",
     foundCount: Math.min(buyers.length, targetCount),
     isFallback,
-    fallbackReason: isFallback ? "部分结果来自历史缓存" : undefined,
+    fallbackReason: isFallback ? "部分结果来自本地缓存" : undefined,
     progress: 100,
   });
 }

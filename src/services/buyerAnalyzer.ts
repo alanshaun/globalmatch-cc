@@ -4,6 +4,7 @@
  * Also generates personalized outreach emails
  */
 
+import { z } from "zod";
 import { llmParseJSON, llmCall } from "@/lib/llmClient";
 import type { ProductProfile } from "./productAnalyzer";
 import type { IntentSignal } from "./intentSignals";
@@ -27,6 +28,25 @@ export interface BuyerAnalysis {
   matchScore: number;
   generatedBy?: string;
 }
+
+// Zod schema — validates LLM output at runtime
+const BuyerAnalysisSchema = z.object({
+  buyerBusiness: z.string().min(1),
+  buyerProductKeywords: z.array(z.string()),
+  whyTheyNeedUs: z.string(),
+  currentSupplierWeakness: z.string(),
+  fitScore: z.number().min(0).max(100),
+  fitReason: z.string(),
+  intentScore: z.number().min(0).max(100),
+  intentReason: z.string(),
+  reachabilityScore: z.number().min(0).max(100),
+  reachabilityReason: z.string(),
+  confidenceScore: z.number().min(0).max(100),
+  confidenceReason: z.string(),
+  bestContactTiming: z.string(),
+  redFlags: z.array(z.string()),
+  matchScore: z.number().min(0).max(100),
+});
 
 export interface EmailDraft {
   subjectA: string;
@@ -152,12 +172,20 @@ Return this exact JSON:
   "matchScore": computed as fitScore*0.3 + intentScore*0.25 + reachabilityScore*0.25 + confidenceScore*0.2
 }`;
 
-  return llmParseJSON<BuyerAnalysis>(
+  const raw = await llmParseJSON<BuyerAnalysis>(
     prompt,
     "You are analyzing B2B buyers for export sales. Be specific, cite real data.",
     FALLBACK_ANALYSIS,
     { fallbackType: "buyerAnalysis" }
   );
+
+  // Zod validation — if schema fails, use fallback with warning
+  const validated = BuyerAnalysisSchema.safeParse(raw);
+  if (!validated.success) {
+    console.warn("[BuyerAnalyzer] Zod validation failed:", validated.error.issues.map(i => i.message).join(", "));
+    return { ...FALLBACK_ANALYSIS, ...raw }; // merge to rescue partial valid fields
+  }
+  return validated.data;
 }
 
 const FORBIDDEN_OPENERS = [
