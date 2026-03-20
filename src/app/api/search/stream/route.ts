@@ -94,7 +94,7 @@ export async function GET(req: NextRequest) {
       const targetCountries = session?.targetCountries || ["美国"];
       const targetCount = session?.targetCount || 20;
 
-      // Run search
+      // Run search — propagate real error detail to client
       await runBuyerSearch(
         sessionId,
         userId,
@@ -103,12 +103,15 @@ export async function GET(req: NextRequest) {
         targetCount,
         send
       ).catch((err) => {
-        console.error("[SSE] Search error:", err);
+        const detail = err instanceof Error ? err.message : String(err);
+        console.error("[SSE] Search failed:", detail);
+        // Send the actual error reason — client will display it in UI
         send({
           type: "error",
-          message: "搜索过程中遇到问题，已返回最优结果",
+          message: detail,
+          errorDetail: detail,
         });
-        send({ type: "completed", foundCount: 0, isFallback: true });
+        // Do NOT send a fake "completed" event — it hides the error from the user
       });
 
       controller.close();

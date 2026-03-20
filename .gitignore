@@ -28,3 +28,7 @@ npm-debug.log*
 
 # Prisma
 prisma/dev.db
+
+# Local SQLite cache (better-sqlite3, auto-created at runtime)
+data/
+*.db

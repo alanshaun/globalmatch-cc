@@ -76,6 +76,7 @@ async function runBuyerJob(
     });
 
     let foundCount = 0;
+    let searchError: Error | null = null;
 
     await runBuyerSearch(
       session.id,
@@ -97,11 +98,27 @@ async function runBuyerJob(
           });
         } else if (event.type === "completed") {
           foundCount = event.foundCount || foundCount;
+        } else if (event.type === "error") {
+          // Capture the specific error detail from the orchestrator
+          searchError = new Error(event.errorDetail || event.message || "搜索失败");
         }
       }
     ).catch((err) => {
-      console.error("[JobRunner:buyer] runBuyerSearch error:", err);
+      searchError = err instanceof Error ? err : new Error(String(err));
+      console.error("[JobRunner:buyer] runBuyerSearch error:", searchError.message);
     });
+
+    // Zero-silent-failure: if search threw, mark job as failed with real reason
+    if (searchError) {
+      const errMsg = (searchError as Error).message;
+      updateJob(jobId, {
+        status: "failed",
+        error: errMsg,
+        message: `搜索失败: ${errMsg}`,
+        completedAt: new Date().toISOString(),
+      });
+      return;
+    }
 
     updateJob(jobId, {
       status: "completed",

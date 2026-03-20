@@ -5,6 +5,7 @@
  */
 
 import { z } from "zod";
+import * as cheerio from "cheerio";
 import { llmParseJSON, llmCall } from "@/lib/llmClient";
 import type { ProductProfile } from "./productAnalyzer";
 import type { IntentSignal } from "./intentSignals";
@@ -73,43 +74,39 @@ const FALLBACK_ANALYSIS: BuyerAnalysis = {
   matchScore: 65,
 };
 
+const SCRAPE_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
+/**
+ * Scrape buyer website using Cheerio (consistent with supply-chain scraper).
+ * Removes noise (nav, footer, scripts, styles), returns first 3000 chars per page.
+ */
 async function scrapeWebsiteContent(domain: string): Promise<string> {
-  const UA =
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-
-  function stripHtml(html: string): string {
-    return html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, "")
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&nbsp;/g, " ")
-      .replace(/\s{2,}/g, " ")
-      .trim();
-  }
-
   const pages = [
     { url: `https://${domain}`, limit: 3000 },
     { url: `https://${domain}/about`, limit: 1500 },
-    { url: `https://${domain}/products`, limit: 2000 },
+    { url: `https://${domain}/products`, limit: 1500 },
   ];
 
-  let content = "";
+  let combined = "";
   for (const { url, limit } of pages) {
     try {
       const res = await fetch(url, {
-        headers: { "User-Agent": UA, Accept: "text/html" },
+        headers: { "User-Agent": SCRAPE_UA, Accept: "text/html" },
         signal: AbortSignal.timeout(8000),
         redirect: "follow",
       });
       if (!res.ok) continue;
       const html = await res.text();
-      const text = stripHtml(html);
-      content += `\n[${url}]\n${text.slice(0, limit)}`;
+      const $ = cheerio.load(html);
+      $("script, style, nav, footer, header, .cookie, #cookie, [aria-hidden='true']").remove();
+      const text = $("body").text().replace(/\s{2,}/g, " ").trim();
+      combined += `\n[${url}]\n${text.slice(0, limit)}`;
     } catch {
       // skip this page
     }
   }
-  return content;
+  return combined.slice(0, 6000);
 }
 
 export async function analyzeBuyer(
